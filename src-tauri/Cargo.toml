@@ -1,0 +1,33 @@
+[package]
+name = "scrcpy-studio"
+version = "0.1.0"
+description = "A Windows desktop GUI for scrcpy 4.1"
+authors = ["lnb2x"]
+license = "MIT"
+repository = "https://github.com/lnb2x/scrcpy-studio"
+publish = false
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.43", features = ["full"] }
+which = "7.0"
+regex = "1.11"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
