@@ -201,11 +201,11 @@ pub fn parse_scrcpy_cameras(output: &str) -> Vec<CameraInfoItem> {
         } else if line.contains('x')
             && (line.starts_with("size ")
                 || line.starts_with("- ")
-                || line.chars().next().map_or(false, |c| c.is_ascii_digit()))
+                || line.chars().next().is_some_and(|c| c.is_ascii_digit()))
         {
             let parts: Vec<&str> = line.split_whitespace().collect();
             for p in parts {
-                if p.contains('x') && p.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if p.contains('x') && p.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     current_sizes.push(p.to_string());
                 }
             }

@@ -10,6 +10,12 @@ pub struct AdbService {
     custom_adb_path: std::sync::Arc<Mutex<Option<PathBuf>>>,
 }
 
+impl Default for AdbService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdbService {
     pub fn new() -> Self {
         Self {
