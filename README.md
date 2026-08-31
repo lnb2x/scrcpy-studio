@@ -7,6 +7,16 @@ Scrcpy Studio is a Windows desktop interface for managing Android devices and la
 
 The app exposes a curated set of scrcpy options for common mirroring, camera, recording, OTG, and virtual-display workflows. Advanced users can append custom arguments when an option is not represented in the UI.
 
+## Screenshots
+
+![Scrcpy Studio dashboard](docs/screenshots/dashboard.png)
+
+_Dashboard and quick actions._
+
+![Scrcpy Studio mirror configuration](docs/screenshots/mirror.png)
+
+_Mirror presets, video settings, and live command configuration._
+
 ## Features
 
 - Discover and inspect USB or wireless ADB devices.
