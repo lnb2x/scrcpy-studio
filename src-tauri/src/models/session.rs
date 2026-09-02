@@ -30,6 +30,7 @@ pub struct ScrcpySession {
 pub struct LogEntry {
     pub timestamp: i64,
     pub session_id: Option<String>,
+    pub source: String,
     pub level: String, // "INFO", "ADB", "SCRCPY", "WARN", "ERROR"
     pub message: String,
     pub raw: String,

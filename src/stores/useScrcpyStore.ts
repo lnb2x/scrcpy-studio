@@ -5,6 +5,8 @@ import { ScrcpyConfig, ScrcpySession } from '@/types/scrcpy';
 import { ScrcpyProfile } from '@/types/profile';
 import { buildScrcpyArgs, formatCommandString } from '@/lib/commandBuilder';
 import { resolveSessionConfig, SessionMode } from '@/lib/sessionConfig';
+import { validateScrcpyConfig } from '@/lib/scrcpyConfig';
+import { formatAppError } from '@/lib/errors';
 import { readStoredArray, writeStoredJson } from '@/lib/storage';
 import { useLogStore } from './useLogStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -143,6 +145,19 @@ export const useScrcpyStore = create<ScrcpyStore>((set, get) => ({
     try {
       const activeSerial = useDeviceStore.getState().selectedSerial;
       const fullConfig = resolveSessionConfig(get().config, overrideConfig, activeSerial, mode);
+      const validationIssues = validateScrcpyConfig(fullConfig);
+      if (validationIssues.length > 0) {
+        const message = validationIssues.map((issue) => issue.message).join(' ');
+        set({ isLaunching: false, lastError: message });
+        useLogStore.getState().addLog({
+          timestamp: Date.now(),
+          source: 'CONFIG',
+          level: 'ERROR',
+          message,
+          raw: message,
+        });
+        return null;
+      }
 
       const session = await invoke<ScrcpySession>('start_scrcpy', {
         config: fullConfig,
@@ -160,9 +175,7 @@ export const useScrcpyStore = create<ScrcpyStore>((set, get) => ({
 
       return session;
     } catch (err) {
-      const msg = typeof err === 'object' && err !== null && 'message' in err
-        ? (err as { message: string }).message
-        : String(err);
+      const msg = formatAppError(err, 'SCRCPY_START_FAILED');
       set({ isLaunching: false, lastError: msg });
       useLogStore.getState().addLog({
         timestamp: Date.now(),
@@ -192,7 +205,15 @@ export const useScrcpyStore = create<ScrcpyStore>((set, get) => ({
         });
       });
     } catch (e) {
-      console.error('Failed to stop session:', e);
+      const message = formatAppError(e, 'SCRCPY_STOP_FAILED');
+      set({ lastError: message });
+      useLogStore.getState().addLog({
+        timestamp: Date.now(),
+        source: 'SCRCPY',
+        level: 'ERROR',
+        message: `Failed to stop scrcpy session: ${message}`,
+        raw: message,
+      });
     }
   },
 
@@ -210,7 +231,14 @@ export const useScrcpyStore = create<ScrcpyStore>((set, get) => ({
         return { sessions: nextSessions, history: nextHistory };
       });
     } catch (e) {
-      console.warn('Failed to fetch active sessions:', e);
+      const message = formatAppError(e, 'SESSION_REFRESH_FAILED');
+      useLogStore.getState().addLog({
+        timestamp: Date.now(),
+        source: 'SCRCPY',
+        level: 'WARN',
+        message: `Failed to refresh active sessions: ${message}`,
+        raw: message,
+      });
     }
   },
 
@@ -234,6 +262,7 @@ export const useScrcpyStore = create<ScrcpyStore>((set, get) => ({
       listen<{
         timestamp: number;
         sessionId?: string;
+        source?: string;
         level: string;
         message: string;
         raw: string;

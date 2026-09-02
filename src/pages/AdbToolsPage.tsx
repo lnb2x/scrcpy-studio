@@ -5,21 +5,23 @@ import {
   Camera,
   RotateCw,
   Search,
-  CheckCircle2,
-  AlertCircle,
   FolderOpen,
   Power,
+  Play,
+  Trash2,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { join } from '@tauri-apps/api/path';
+import { toast } from 'sonner';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useTranslation } from '@/lib/i18n';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { formatAppError } from '@/lib/errors';
 
 export const AdbToolsPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tf } = useTranslation();
   const { selectedDevice } = useDeviceStore();
   const { settings } = useSettingsStore();
   const selectedSerial = selectedDevice?.state === 'device' ? selectedDevice.serial : null;
@@ -44,9 +46,9 @@ export const AdbToolsPage: React.FC = () => {
   const [packages, setPackages] = useState<string[]>([]);
   const [appSearch, setAppSearch] = useState('');
   const [isLoadingPackages, setIsLoadingPackages] = useState(false);
+  const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
 
-  // Status & Confirm Dialog State
-  const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  // Reboot confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -95,7 +97,7 @@ export const AdbToolsPage: React.FC = () => {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Android Package', extensions: ['apk'] }],
+        filters: [{ name: t('androidPackageFile'), extensions: ['apk'] }],
       });
       if (selected && typeof selected === 'string') {
         setApkPath(selected);
@@ -106,91 +108,119 @@ export const AdbToolsPage: React.FC = () => {
   };
 
   const handlePushFile = async () => {
-    if (!selectedDevice || !localPushPath.trim()) return;
+    if (!selectedSerial || !localPushPath.trim()) return;
+    if (!remotePushPath.trim()) {
+      toast.error(t('remoteDestinationRequired'));
+      return;
+    }
     setIsPushing(true);
-    setStatusMessage(null);
     try {
       const res = await invoke<string>('adb_push_file', {
-        serial: selectedDevice.serial,
+        serial: selectedSerial,
         localPath: localPushPath.trim(),
         remotePath: remotePushPath.trim(),
       });
-      setStatusMessage({ text: `File pushed successfully! ${res}`, isError: false });
+      toast.success(tf('filePushed', { result: res }));
       setLocalPushPath('');
     } catch (e) {
-      setStatusMessage({ text: `Failed to push file: ${String(e)}`, isError: true });
+      toast.error(`${t('pushFailed')}: ${formatAppError(e)}`);
     } finally {
       setIsPushing(false);
     }
   };
 
   const handleInstallApk = async () => {
-    if (!selectedDevice || !apkPath.trim()) return;
+    if (!selectedSerial || !apkPath.trim()) return;
     setIsInstalling(true);
-    setStatusMessage(null);
     try {
       const res = await invoke<string>('adb_install_apk', {
-        serial: selectedDevice.serial,
+        serial: selectedSerial,
         apkPath: apkPath.trim(),
         reinstall,
         downgrade,
         grantPermissions: grantPerms,
       });
-      setStatusMessage({ text: `APK Installed Successfully! ${res}`, isError: false });
+      toast.success(tf('apkInstalled', { result: res }));
       setApkPath('');
-      fetchPackages();
+      void fetchPackages();
     } catch (e) {
-      setStatusMessage({ text: `Installation failed: ${String(e)}`, isError: true });
+      toast.error(`${t('apkInstallFailed')}: ${formatAppError(e)}`);
     } finally {
       setIsInstalling(false);
     }
   };
 
   const handleTakeScreenshot = async () => {
-    if (!selectedDevice) return;
+    if (!selectedSerial) return;
     setIsCapturingScreenshot(true);
-    setStatusMessage(null);
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `screenshot_${selectedDevice.serial}_${timestamp}.png`;
+      const filename = `screenshot_${selectedSerial}_${timestamp}.png`;
       const targetDir = settings.screenshotsDir || 'C:\\';
-      const fullPath = `${targetDir}\\${filename}`;
+      const fullPath = await join(targetDir, filename);
 
       await invoke<string>('adb_take_screenshot', {
-        serial: selectedDevice.serial,
+        serial: selectedSerial,
         targetPath: fullPath,
       });
 
       setLastScreenshotPath(fullPath);
-      setStatusMessage({ text: `Screenshot saved to ${fullPath}`, isError: false });
+      toast.success(tf('screenshotSaved', { path: fullPath }));
     } catch (e) {
-      setStatusMessage({ text: `Failed to capture screenshot: ${String(e)}`, isError: true });
+      toast.error(`${t('screenshotFailed')}: ${formatAppError(e)}`);
     } finally {
       setIsCapturingScreenshot(false);
     }
   };
 
+  const handleOpenScreenshotsFolder = async () => {
+    try {
+      await invoke('open_directory', { path: settings.screenshotsDir || 'C:\\' });
+    } catch (error) {
+      toast.error(`${t('openFolderFailed')}: ${formatAppError(error)}`);
+    }
+  };
+
   const triggerReboot = (mode?: string, title?: string) => {
-    if (!selectedDevice) return;
+    if (!selectedSerial) return;
+    const serial = selectedSerial;
+    const target = mode ? `${serial} (${mode})` : serial;
     setConfirmDialog({
       isOpen: true,
       title: title || t('rebootNormal'),
-      message: `Are you sure you want to reboot ${selectedDevice.serial}${
-        mode ? ` into ${mode}` : ''
-      }? This will disconnect active sessions.`,
+      message: tf('rebootConfirm', { target }),
       action: async () => {
         try {
-          await invoke('adb_reboot_device', {
-            serial: selectedDevice.serial,
-            mode: mode || null,
-          });
-          setStatusMessage({ text: `Reboot command sent to ${selectedDevice.serial}`, isError: false });
+          await invoke('adb_reboot_device', { serial, mode: mode || null });
+          toast.success(tf('rebootSent', { serial }));
         } catch (e) {
-          setStatusMessage({ text: `Reboot failed: ${String(e)}`, isError: true });
+          toast.error(`${t('rebootFailed')}: ${formatAppError(e)}`);
         }
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
       },
     });
+  };
+
+  const handleLaunchApp = async (pkg: string) => {
+    if (!selectedSerial) return;
+    try {
+      await invoke('adb_launch_app', { serial: selectedSerial, package: pkg });
+      toast.success(tf('appLaunched', { name: pkg }));
+    } catch (e) {
+      toast.error(`${t('launchAppFailed')}: ${formatAppError(e)}`);
+    }
+  };
+
+  const handleUninstallApp = async () => {
+    if (!selectedSerial || !pendingUninstall) return;
+    try {
+      await invoke('adb_uninstall_app', { serial: selectedSerial, package: pendingUninstall });
+      toast.success(tf('appUninstalled', { name: pendingUninstall }));
+      setPendingUninstall(null);
+      void fetchPackages();
+    } catch (e) {
+      toast.error(`${t('uninstallAppFailed')}: ${formatAppError(e)}`);
+    }
   };
 
   return (
@@ -200,28 +230,8 @@ export const AdbToolsPage: React.FC = () => {
         <h1 className="text-2xl font-bold text-text-primary tracking-tight">
           {t('adbToolsTitle')}
         </h1>
-        <p className="text-xs text-text-secondary mt-1">
-          Perform file transfer, APK installations, screen captures, and direct device system actions.
-        </p>
+        <p className="text-xs text-text-secondary mt-1">{t('adbToolsDescription')}</p>
       </div>
-
-      {/* Status Notice */}
-      {statusMessage && (
-        <div
-          className={`p-4 rounded-2xl border flex items-center gap-3 text-xs leading-relaxed ${
-            statusMessage.isError
-              ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-              : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-          }`}
-        >
-          {statusMessage.isError ? (
-            <AlertCircle className="w-4 h-4 shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-          )}
-          <span>{statusMessage.text}</span>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 1. File Transfer (Push) */}
@@ -238,13 +248,13 @@ export const AdbToolsPage: React.FC = () => {
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-text-secondary">Local File</label>
+              <label className="text-[11px] font-semibold text-text-secondary">{t('localFile')}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={localPushPath}
                   onChange={(e) => setLocalPushPath(e.target.value)}
-                  placeholder="Select or enter local file path..."
+                  placeholder={t('localFilePlaceholder')}
                   className="flex-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
                 />
                 <button
@@ -252,13 +262,15 @@ export const AdbToolsPage: React.FC = () => {
                   onClick={handleBrowsePushFile}
                   className="px-3 py-2 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary text-xs border border-border"
                 >
-                  Browse
+                  {t('browse')}
                 </button>
               </div>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-text-secondary">Remote Destination</label>
+              <label className="text-[11px] font-semibold text-text-secondary">
+                {t('remoteDestination')}
+              </label>
               <input
                 type="text"
                 value={remotePushPath}
@@ -281,12 +293,13 @@ export const AdbToolsPage: React.FC = () => {
             </div>
 
             <button
-              onClick={handlePushFile}
-              disabled={isPushing || !localPushPath.trim() || !selectedDevice}
+              type="button"
+              onClick={() => void handlePushFile()}
+              disabled={isPushing || !localPushPath.trim() || !selectedSerial}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-sm transition-all transform active:scale-98 disabled:opacity-50"
             >
               <Upload className="w-4 h-4" />
-              <span>{isPushing ? 'Pushing...' : 'Push File to Device'}</span>
+              <span>{isPushing ? t('pushingFile') : t('pushFile')}</span>
             </button>
           </div>
         </div>
@@ -299,19 +312,19 @@ export const AdbToolsPage: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-primary">{t('apkInstaller')}</h3>
-              <p className="text-xs text-text-secondary">Direct install APK on connected device</p>
+              <p className="text-xs text-text-secondary">{t('apkInstallerDescription')}</p>
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-text-secondary">APK File</label>
+              <label className="text-[11px] font-semibold text-text-secondary">{t('apkFile')}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={apkPath}
                   onChange={(e) => setApkPath(e.target.value)}
-                  placeholder="Select .apk file..."
+                  placeholder={t('apkFilePlaceholder')}
                   className="flex-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
                 />
                 <button
@@ -319,7 +332,7 @@ export const AdbToolsPage: React.FC = () => {
                   onClick={handleBrowseApk}
                   className="px-3 py-2 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary text-xs border border-border"
                 >
-                  Browse
+                  {t('browse')}
                 </button>
               </div>
             </div>
@@ -357,12 +370,13 @@ export const AdbToolsPage: React.FC = () => {
             </div>
 
             <button
-              onClick={handleInstallApk}
-              disabled={isInstalling || !apkPath.trim() || !selectedDevice}
+              type="button"
+              onClick={() => void handleInstallApk()}
+              disabled={isInstalling || !apkPath.trim() || !selectedSerial}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm transition-all transform active:scale-98 disabled:opacity-50"
             >
               <Package className="w-4 h-4" />
-              <span>{isInstalling ? 'Installing...' : t('installApkBtn')}</span>
+              <span>{isInstalling ? t('installingApk') : t('installApkBtn')}</span>
             </button>
           </div>
         </div>
@@ -375,27 +389,28 @@ export const AdbToolsPage: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-primary">{t('takeScreenshot')}</h3>
-              <p className="text-xs text-text-secondary">
-                Direct lossless framebuffer capture to Pictures folder
-              </p>
+              <p className="text-xs text-text-secondary">{t('screenshotDescription')}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <button
-              onClick={handleTakeScreenshot}
-              disabled={isCapturingScreenshot || !selectedDevice}
+              type="button"
+              onClick={() => void handleTakeScreenshot()}
+              disabled={isCapturingScreenshot || !selectedSerial}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-surface-hover hover:bg-surface-active text-text-primary text-xs font-semibold border border-border transition-colors disabled:opacity-50"
             >
               <Camera className="w-4 h-4" />
-              <span>{isCapturingScreenshot ? 'Capturing...' : 'Capture Screen'}</span>
+              <span>{isCapturingScreenshot ? t('capturingScreenshot') : t('captureScreen')}</span>
             </button>
 
             {lastScreenshotPath && (
               <button
-                onClick={() => openPath(settings.screenshotsDir || 'C:\\')}
+                type="button"
+                onClick={() => void handleOpenScreenshotsFolder()}
                 className="p-2.5 rounded-xl bg-surface-hover hover:bg-surface-active border border-border text-text-secondary hover:text-text-primary"
-                title="Open Screenshots Folder"
+                title={t('openScreenshotsFolder')}
+                aria-label={t('openScreenshotsFolder')}
               >
                 <FolderOpen className="w-4 h-4" />
               </button>
@@ -411,38 +426,42 @@ export const AdbToolsPage: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-text-primary">{t('deviceCommands')}</h3>
-              <p className="text-xs text-text-secondary">System reboot actions with confirmation</p>
+              <p className="text-xs text-text-secondary">{t('rebootDescription')}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
             <button
+              type="button"
               onClick={() => triggerReboot(undefined, t('rebootNormal'))}
-              disabled={!selectedDevice}
+              disabled={!selectedSerial}
               className="py-2 px-3 rounded-xl bg-surface hover:bg-surface-hover border border-border text-xs font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               {t('rebootNormal')}
             </button>
 
             <button
+              type="button"
               onClick={() => triggerReboot('recovery', t('rebootRecovery'))}
-              disabled={!selectedDevice}
+              disabled={!selectedSerial}
               className="py-2 px-3 rounded-xl bg-surface hover:bg-surface-hover border border-border text-xs font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               {t('rebootRecovery')}
             </button>
 
             <button
+              type="button"
               onClick={() => triggerReboot('bootloader', t('rebootBootloader'))}
-              disabled={!selectedDevice}
+              disabled={!selectedSerial}
               className="py-2 px-3 rounded-xl bg-surface hover:bg-surface-hover border border-border text-xs font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               {t('rebootBootloader')}
             </button>
 
             <button
+              type="button"
               onClick={() => triggerReboot('fastboot', t('rebootFastboot'))}
-              disabled={!selectedDevice}
+              disabled={!selectedSerial}
               className="py-2 px-3 rounded-xl bg-surface hover:bg-surface-hover border border-border text-xs font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
             >
               {t('rebootFastboot')}
@@ -456,7 +475,7 @@ export const AdbToolsPage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h3 className="text-sm font-bold text-text-primary">{t('installedApps')}</h3>
-            <p className="text-xs text-text-secondary">Probed 3rd-party Android application packages</p>
+            <p className="text-xs text-text-secondary">{t('installedAppsDescription')}</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -471,10 +490,12 @@ export const AdbToolsPage: React.FC = () => {
               />
             </div>
             <button
-              onClick={fetchPackages}
-              disabled={isLoadingPackages || !selectedDevice}
+              type="button"
+              onClick={() => void fetchPackages()}
+              disabled={isLoadingPackages || !selectedSerial}
               className="p-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-border text-text-secondary"
-              title="Refresh Apps"
+              title={t('refreshApps')}
+              aria-label={t('refreshApps')}
             >
               <RotateCw className={`w-3.5 h-3.5 ${isLoadingPackages ? 'animate-spin' : ''}`} />
             </button>
@@ -483,7 +504,7 @@ export const AdbToolsPage: React.FC = () => {
 
         {packages.length === 0 ? (
           <div className="p-6 text-center text-xs text-text-muted bg-surface rounded-xl border border-border">
-            {isLoadingPackages ? 'Loading packages from device...' : 'No packages detected.'}
+            {isLoadingPackages ? t('loadingPackages') : t('noPackages')}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-1">
@@ -492,18 +513,50 @@ export const AdbToolsPage: React.FC = () => {
               .map((pkg) => (
                 <div
                   key={pkg}
-                  className="p-2.5 rounded-lg bg-surface border border-border flex items-center justify-between text-xs font-mono text-text-secondary"
+                  className="p-2.5 rounded-lg bg-surface border border-border flex items-center justify-between text-xs font-mono text-text-secondary group"
                 >
                   <span className="truncate mr-2" title={pkg}>
                     {pkg}
                   </span>
+
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void handleLaunchApp(pkg)}
+                      className="p-1 rounded hover:bg-surface-active text-text-secondary hover:text-emerald-400 transition-colors"
+                      title={t('launchApp')}
+                      aria-label={`${t('launchApp')}: ${pkg}`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingUninstall(pkg)}
+                      className="p-1 rounded hover:bg-surface-active text-text-secondary hover:text-rose-400 transition-colors"
+                      title={t('uninstallApp')}
+                      aria-label={`${t('uninstallApp')}: ${pkg}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
           </div>
         )}
       </div>
 
-      {/* Confirmation Dialog */}
+      {/* Uninstall Confirmation */}
+      <ConfirmDialog
+        isOpen={!!pendingUninstall}
+        title={t('uninstallApp')}
+        message={pendingUninstall ? tf('uninstallAppConfirm', { name: pendingUninstall }) : ''}
+        isDestructive={true}
+        confirmText={t('uninstallApp')}
+        onConfirm={handleUninstallApp}
+        onCancel={() => setPendingUninstall(null)}
+      />
+
+      {/* Reboot Confirmation */}
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}
         title={confirmDialog.title}

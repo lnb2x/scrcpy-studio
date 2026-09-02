@@ -8,6 +8,10 @@ import { useTranslation } from '@/lib/i18n';
 import { CameraConfig, CameraInfoItem } from '@/types/scrcpy';
 import { CommandPreview } from '@/components/common/CommandPreview';
 
+function normalizeCameraFacing(value: string): CameraConfig['cameraFacing'] {
+  return value === 'front' || value === 'back' || value === 'external' ? value : 'back';
+}
+
 export const CameraPage: React.FC = () => {
   const { t } = useTranslation();
   const { config, startSession, sessions, stopSession } = useScrcpyStore();
@@ -48,7 +52,7 @@ export const CameraPage: React.FC = () => {
         setCameraConfig((prev) => ({
           ...prev,
           cameraId: list[0].id,
-          cameraFacing: (list[0].facing as any) || 'back',
+          cameraFacing: normalizeCameraFacing(list[0].facing),
         }));
       }
     } catch (e) {
@@ -232,7 +236,7 @@ export const CameraPage: React.FC = () => {
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold shadow-sm transition-all"
               >
                 <Radio className="w-4 h-4 animate-pulse" />
-                <span>Stop Camera Stream</span>
+                <span>{t('stopCameraStream')}</span>
               </button>
             ) : (
               <>
@@ -261,18 +265,18 @@ export const CameraPage: React.FC = () => {
         {/* Detected Hardware Cameras Info */}
         <div className="p-6 rounded-2xl bg-card border border-border space-y-4">
           <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-            Detected Camera Sensors
+            {t('detectedCameraSensors')}
           </h3>
 
           {detectedCameras.length === 0 ? (
             <div className="p-8 text-center text-xs text-text-muted rounded-xl bg-surface border border-border space-y-2">
               <Camera className="w-6 h-6 mx-auto text-text-muted" />
-              <p>No camera data queried yet.</p>
+              <p>{t('noCameraData')}</p>
               <button
                 onClick={handleDetectCameras}
                 className="text-xs text-primary hover:underline"
               >
-                Click to probe device cameras
+                {t('probeDeviceCameras')}
               </button>
             </div>
           ) : (
@@ -284,7 +288,7 @@ export const CameraPage: React.FC = () => {
                     setCameraConfig((prev) => ({
                       ...prev,
                       cameraId: cam.id,
-                      cameraFacing: (cam.facing as any) || 'back',
+                      cameraFacing: normalizeCameraFacing(cam.facing),
                     }))
                   }
                   className="p-3 rounded-xl bg-surface border border-border hover:border-primary/40 cursor-pointer transition-colors"
@@ -296,7 +300,7 @@ export const CameraPage: React.FC = () => {
                     </span>
                   </div>
                   <div className="text-[11px] text-text-secondary font-mono">
-                    Sizes: {cam.sizes.slice(0, 3).join(', ') || '1920x1080'}
+                    {t('cameraSizes')}: {cam.sizes.slice(0, 3).join(', ') || '1920x1080'}
                   </div>
                 </div>
               ))}

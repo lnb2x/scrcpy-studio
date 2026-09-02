@@ -50,3 +50,10 @@ export interface DeviceInfo {
   supportsCamera: boolean;
   supportsVirtualDisplay: boolean;
 }
+
+export interface MdnsService {
+  name: string;
+  serviceType: string;
+  address: string;
+  isPairing: boolean;
+}

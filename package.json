@@ -22,6 +22,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "check:versions": "node scripts/check-version.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run"
@@ -31,7 +32,8 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-fs": "^2.5.2",
-    "@tauri-apps/plugin-opener": "^2.5.5",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.9.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "lucide-react": "^1.38.0",

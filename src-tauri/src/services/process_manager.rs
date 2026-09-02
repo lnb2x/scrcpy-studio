@@ -1,12 +1,13 @@
 use crate::models::{AppError, AppResult, LogEntry, ScrcpySession, SessionStatus};
 use chrono::Utc;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration, Instant};
 use uuid::Uuid;
 
 fn session_status_from_exit_code(exit_code: Option<i32>) -> SessionStatus {
@@ -22,7 +23,6 @@ fn session_status_from_exit_code(exit_code: Option<i32>) -> SessionStatus {
 
 struct ActiveProcess {
     session: ScrcpySession,
-    child: Option<Child>,
 }
 
 #[derive(Clone)]
@@ -51,6 +51,22 @@ impl ProcessManager {
         device_serial: String,
         mode: String,
     ) -> AppResult<ScrcpySession> {
+        {
+            let processes = self.processes.lock().await;
+            if let Some(existing) = processes.values().find(|process| {
+                process.session.device_serial == device_serial
+                    && matches!(
+                        process.session.status,
+                        SessionStatus::Starting | SessionStatus::Running | SessionStatus::Stopping
+                    )
+            }) {
+                return Err(AppError::InvalidConfig(format!(
+                    "Device {} already has an active scrcpy session ({})",
+                    device_serial, existing.session.id
+                )));
+            }
+        }
+
         let session_id = Uuid::new_v4().to_string();
         let started_at = Utc::now().timestamp_millis();
 
@@ -87,17 +103,30 @@ impl ProcessManager {
             error_message: None,
         };
 
-        // Capture stdout
+        // Capture stdout/stderr before moving the child into its monitor task.
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
+        let stderr_tail = Arc::new(Mutex::new(VecDeque::<String>::with_capacity(20)));
 
         {
             let mut procs = self.processes.lock().await;
+            // Close the small race between the first duplicate check and spawn.
+            if procs.values().any(|process| {
+                process.session.device_serial == device_serial
+                    && matches!(
+                        process.session.status,
+                        SessionStatus::Starting | SessionStatus::Running | SessionStatus::Stopping
+                    )
+            }) {
+                let _ = child.start_kill();
+                return Err(AppError::InvalidConfig(format!(
+                    "Device {device_serial} already has an active scrcpy session"
+                )));
+            }
             procs.insert(
                 session_id.clone(),
                 ActiveProcess {
                     session: session.clone(),
-                    child: Some(child),
                 },
             );
         }
@@ -111,19 +140,20 @@ impl ProcessManager {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
-                    let level = if line.contains("ERROR:") || line.contains("[error]") {
-                        "ERROR"
+                    let (source, level) = if line.contains("ERROR:") || line.contains("[error]") {
+                        ("SCRCPY", "ERROR")
                     } else if line.contains("WARN:") || line.contains("[warn]") {
-                        "WARN"
+                        ("SCRCPY", "WARN")
                     } else if line.contains("adb:") {
-                        "ADB"
+                        ("ADB", "INFO")
                     } else {
-                        "SCRCPY"
+                        ("SCRCPY", "INFO")
                     };
 
                     let log_entry = LogEntry {
                         timestamp: Utc::now().timestamp_millis(),
                         session_id: Some(sid_stdout.clone()),
+                        source: source.to_string(),
                         level: level.to_string(),
                         message: line.clone(),
                         raw: line,
@@ -135,6 +165,7 @@ impl ProcessManager {
 
         let sid_stderr = session_id.clone();
         let app_stderr = app_handle.clone();
+        let stderr_tail_writer = stderr_tail.clone();
         if let Some(stderr) = stderr {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
@@ -150,9 +181,18 @@ impl ProcessManager {
                         "INFO"
                     };
 
+                    {
+                        let mut tail = stderr_tail_writer.lock().await;
+                        if tail.len() == 20 {
+                            tail.pop_front();
+                        }
+                        tail.push_back(line.clone());
+                    }
+
                     let log_entry = LogEntry {
                         timestamp: Utc::now().timestamp_millis(),
                         session_id: Some(sid_stderr.clone()),
+                        source: "SCRCPY".to_string(),
                         level: level.to_string(),
                         message: line.clone(),
                         raw: line,
@@ -168,59 +208,98 @@ impl ProcessManager {
         let app_exit = app_handle.clone();
 
         tokio::spawn(async move {
-            let mut child_opt = {
-                let mut procs = processes_clone.lock().await;
-                if let Some(proc) = procs.get_mut(&sid_exit) {
-                    proc.child.take()
+            let status_result = child.wait().await;
+            let exit_code = status_result
+                .as_ref()
+                .ok()
+                .and_then(std::process::ExitStatus::code);
+            let stopped_at = Utc::now().timestamp_millis();
+            tokio::task::yield_now().await;
+            let stderr_details = stderr_tail
+                .lock()
+                .await
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let mut procs = processes_clone.lock().await;
+            if let Some(proc) = procs.get_mut(&sid_exit) {
+                let was_stopping = proc.session.status == SessionStatus::Stopping;
+                proc.session.status = if was_stopping {
+                    SessionStatus::Stopped
+                } else if status_result.is_err() {
+                    SessionStatus::Failed
                 } else {
-                    None
+                    session_status_from_exit_code(exit_code)
+                };
+                proc.session.stopped_at = Some(stopped_at);
+                proc.session.exit_code = exit_code;
+                if proc.session.status == SessionStatus::Failed {
+                    proc.session.error_message = Some(if stderr_details.is_empty() {
+                        status_result.map_or_else(
+                            |error| format!("Could not wait for scrcpy process: {error}"),
+                            |_| format!("scrcpy exited with status {}", exit_code.unwrap_or(-1)),
+                        )
+                    } else {
+                        stderr_details
+                    });
                 }
-            };
 
-            if let Some(mut child) = child_opt.take() {
-                let status_res = child.wait().await;
-                let exit_code = status_res.as_ref().ok().and_then(|s| s.code());
-                let stopped_at = Utc::now().timestamp_millis();
-
-                let mut procs = processes_clone.lock().await;
-                if let Some(proc) = procs.get_mut(&sid_exit) {
-                    proc.session.status = session_status_from_exit_code(exit_code);
-                    proc.session.stopped_at = Some(stopped_at);
-                    proc.session.exit_code = exit_code;
-
-                    let _ = app_exit.emit("scrcpy:status", &proc.session);
-                }
+                let _ = app_exit.emit("scrcpy:status", &proc.session);
             }
+            // The frontend owns the bounded session history after the terminal
+            // status event. Do not retain completed child processes indefinitely.
+            procs.remove(&sid_exit);
         });
 
         Ok(session)
     }
 
     pub async fn stop_session(&self, session_id: &str) -> AppResult<bool> {
-        let mut procs = self.processes.lock().await;
-        if let Some(proc) = procs.get_mut(session_id) {
-            proc.session.status = SessionStatus::Stopping;
-            if let Some(mut child) = proc.child.take() {
-                let _ = child.kill().await;
-            } else if let Some(pid) = proc.session.process_id {
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/F", "/T"])
-                        .output();
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = std::process::Command::new("kill")
-                        .args(["-9", &pid.to_string()])
-                        .output();
-                }
+        let pid = {
+            let mut procs = self.processes.lock().await;
+            let Some(proc) = procs.get_mut(session_id) else {
+                return Ok(false);
+            };
+            if !matches!(
+                proc.session.status,
+                SessionStatus::Starting | SessionStatus::Running
+            ) {
+                return Ok(false);
             }
-            proc.session.status = SessionStatus::Stopped;
-            proc.session.stopped_at = Some(Utc::now().timestamp_millis());
-            return Ok(true);
+            proc.session.status = SessionStatus::Stopping;
+            proc.session.process_id
+        };
+
+        let Some(pid) = pid else {
+            return Err(AppError::ProcessFailed(format!(
+                "Session {session_id} has no process id"
+            )));
+        };
+
+        terminate_process(pid, false).await?;
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let is_terminal = {
+                let procs = self.processes.lock().await;
+                match procs.get(session_id) {
+                    None => true,
+                    Some(process) => matches!(
+                        process.session.status,
+                        SessionStatus::Stopped | SessionStatus::Failed
+                    ),
+                }
+            };
+            if is_terminal {
+                return Ok(true);
+            }
+            sleep(Duration::from_millis(100)).await;
         }
-        Ok(false)
+
+        terminate_process(pid, true).await?;
+        Ok(true)
     }
 
     pub async fn get_sessions(&self) -> Vec<ScrcpySession> {
@@ -253,6 +332,61 @@ impl ProcessManager {
         }
         None
     }
+}
+
+async fn terminate_process(pid: u32, force: bool) -> AppResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let pid_text = pid.to_string();
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", &pid_text, "/T"]);
+        if force {
+            command.arg("/F");
+        }
+        command.creation_flags(0x08000000);
+        let output = command.output().await.map_err(|error| {
+            AppError::ProcessFailed(format!("Could not terminate scrcpy process {pid}: {error}"))
+        })?;
+        // taskkill returns an error if the process exited between the status
+        // check and this call. That is a successful stop from the user's view.
+        if !output.status.success() && !force {
+            return Ok(());
+        }
+        if !output.status.success() {
+            let details = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+            if !details.contains("not found") && !details.contains("no running instance") {
+                return Err(AppError::ProcessFailed(format!(
+                    "Could not terminate scrcpy process {pid}: {}",
+                    details.trim()
+                )));
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let output = Command::new("kill")
+            .args([signal, &pid.to_string()])
+            .output()
+            .await
+            .map_err(|error| {
+                AppError::ProcessFailed(format!(
+                    "Could not terminate scrcpy process {pid}: {error}"
+                ))
+            })?;
+        if !output.status.success() {
+            let details = String::from_utf8_lossy(&output.stderr);
+            if !details.contains("No such process") {
+                return Err(AppError::ProcessFailed(format!(
+                    "Could not terminate scrcpy process {pid}: {}",
+                    details.trim()
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -300,14 +434,12 @@ mod tests {
                 "running".to_string(),
                 ActiveProcess {
                     session: session("running", SessionStatus::Running),
-                    child: None,
                 },
             );
             processes.insert(
                 "stopped".to_string(),
                 ActiveProcess {
                     session: session("stopped", SessionStatus::Stopped),
-                    child: None,
                 },
             );
         }

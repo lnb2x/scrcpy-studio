@@ -20,6 +20,17 @@ describe('ADB wireless address validation', () => {
     expect(normalizeAdbAddress('192.168.1.7')).toBeNull();
   });
 
+  it('accepts hostnames and bracketed IPv6 addresses', () => {
+    expect(normalizeAdbAddress('Pixel-8.local:37123')).toBe('pixel-8.local:37123');
+    expect(normalizeAdbAddress('[2001:db8::1]:5555')).toBe('[2001:db8::1]:5555');
+    expect(normalizeAdbAddress('2001:db8::1', '5555')).toBe('[2001:db8::1]:5555');
+  });
+
+  it('rejects malformed hostnames and IPv6 addresses', () => {
+    expect(normalizeAdbAddress('-pixel.local:5555')).toBeNull();
+    expect(normalizeAdbAddress('[2001::db8::1]:5555')).toBeNull();
+  });
+
   it('accepts only six-digit pairing codes', () => {
     expect(isPairingCode('123456')).toBe(true);
     expect(isPairingCode('12345')).toBe(false);

@@ -1,4 +1,4 @@
-use crate::models::AppResult;
+use crate::models::{AppError, AppResult, MdnsService, RemoteFileEntry};
 use crate::services::AdbService;
 use tauri::State;
 
@@ -103,4 +103,64 @@ pub fn adb_kill_server(adb_service: State<'_, AdbService>) -> AppResult<String> 
 #[tauri::command]
 pub fn adb_start_server(adb_service: State<'_, AdbService>) -> AppResult<String> {
     adb_service.start_server()
+}
+
+#[tauri::command]
+pub async fn adb_discover_mdns(adb_service: State<'_, AdbService>) -> AppResult<Vec<MdnsService>> {
+    let service = adb_service.inner().clone();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || service.discover_mdns_services()),
+    )
+    .await
+    .map_err(|_| {
+        AppError::CommandFailed("ADB mDNS discovery timed out after 5 seconds".to_string())
+    })?
+    .map_err(|error| AppError::CommandFailed(format!("ADB mDNS discovery task failed: {error}")))?
+}
+
+#[tauri::command]
+pub fn adb_launch_app(
+    serial: String,
+    package: String,
+    adb_service: State<'_, AdbService>,
+) -> AppResult<String> {
+    adb_service.launch_app(&serial, &package)
+}
+
+#[tauri::command]
+pub fn adb_uninstall_app(
+    serial: String,
+    package: String,
+    adb_service: State<'_, AdbService>,
+) -> AppResult<String> {
+    adb_service.uninstall_app(&serial, &package)
+}
+
+#[tauri::command]
+pub fn adb_list_directory(
+    serial: String,
+    path: String,
+    adb_service: State<'_, AdbService>,
+) -> AppResult<Vec<RemoteFileEntry>> {
+    adb_service.list_directory(&serial, &path)
+}
+
+#[tauri::command]
+pub fn adb_make_directory(
+    serial: String,
+    path: String,
+    adb_service: State<'_, AdbService>,
+) -> AppResult<String> {
+    adb_service.make_directory(&serial, &path)
+}
+
+#[tauri::command]
+pub fn adb_delete_path(
+    serial: String,
+    path: String,
+    recursive: Option<bool>,
+    adb_service: State<'_, AdbService>,
+) -> AppResult<String> {
+    adb_service.delete_path(&serial, &path, recursive.unwrap_or(false))
 }

@@ -7,13 +7,14 @@ import {
   FileVideo,
   ExternalLink,
 } from 'lucide-react';
-import { openPath } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useScrcpyStore } from '@/stores/useScrcpyStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useTranslation } from '@/lib/i18n';
 import { CommandPreview } from '@/components/common/CommandPreview';
+import { invoke } from '@tauri-apps/api/core';
+import { formatAppError } from '@/lib/errors';
 
 interface SavedRecording {
   name: string;
@@ -24,7 +25,7 @@ interface SavedRecording {
 
 export const RecordingPage: React.FC = () => {
   const { t } = useTranslation();
-  const { config, startSession, sessions, stopSession } = useScrcpyStore();
+  const { config, startSession, sessions, history, stopSession } = useScrcpyStore();
   const { selectedDevice } = useDeviceStore();
   const { settings, updateSettings } = useSettingsStore();
 
@@ -35,6 +36,8 @@ export const RecordingPage: React.FC = () => {
   const [noPlayback, setNoPlayback] = useState(false);
   const [recordOrientation, setRecordOrientation] = useState('0');
   const [savedRecordings, setSavedRecordings] = useState<SavedRecording[]>([]);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [lastRecordingSessionId, setLastRecordingSessionId] = useState<string | null>(null);
 
   const activeRecording = sessions.find(
     (s) => s.mode === 'record' && s.status === 'running'
@@ -50,6 +53,12 @@ export const RecordingPage: React.FC = () => {
     }, 1000);
     return () => clearInterval(interval);
   }, [activeRecording]);
+
+  const failedRecording = history.find(
+    (session) => session.id === lastRecordingSessionId && session.status === 'failed'
+  );
+  const displayedRecordingError =
+    recordingError ?? (failedRecording ? failedRecording.errorMessage || t('recordingFailed') : null);
 
   const durationSec = activeRecording
     ? Math.max(0, Math.floor((timerNow - activeRecording.startedAt) / 1000))
@@ -106,10 +115,21 @@ export const RecordingPage: React.FC = () => {
 
   const handleStartRecording = async () => {
     const fullConfig = buildRecordingConfig();
-    const targetFile = fullConfig.recordPath;
+    setRecordingError(null);
+    setLastRecordingSessionId(null);
+    let targetFile: string;
+    try {
+      targetFile = await invoke<string>('prepare_recording_path', {
+        path: fullConfig.recordPath,
+      });
+    } catch (error) {
+      setRecordingError(formatAppError(error, 'RECORDING_FAILED'));
+      return;
+    }
 
-    const session = await startSession(fullConfig, 'record');
+    const session = await startSession({ ...fullConfig, recordPath: targetFile }, 'record');
     if (session) {
+      setLastRecordingSessionId(session.id);
       setSavedRecordings((prev) => [
         {
           name: `${targetFile.split('\\').pop()}`,
@@ -118,6 +138,8 @@ export const RecordingPage: React.FC = () => {
         },
         ...prev,
       ]);
+    } else {
+      setRecordingError(useScrcpyStore.getState().lastError ?? t('recordingFailed'));
     }
   };
 
@@ -125,9 +147,9 @@ export const RecordingPage: React.FC = () => {
     const target = folderPath || settings.recordingsDir;
     if (target) {
       try {
-        await openPath(target);
+        await invoke('open_directory', { path: target });
       } catch (e) {
-        console.warn('Failed to open folder:', e);
+        setRecordingError(`${t('openFolderFailed')}: ${formatAppError(e)}`);
       }
     }
   };
@@ -153,7 +175,8 @@ export const RecordingPage: React.FC = () => {
         </div>
 
         <button
-          onClick={() => handleOpenFolder()}
+          type="button"
+          onClick={() => void handleOpenFolder()}
           className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-hover hover:bg-surface-active text-text-secondary hover:text-text-primary text-xs font-semibold border border-border transition-colors"
         >
           <FolderOpen className="w-3.5 h-3.5" />
@@ -180,7 +203,8 @@ export const RecordingPage: React.FC = () => {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => stopSession(activeRecording.id)}
+              type="button"
+              onClick={() => void stopSession(activeRecording.id)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition-all transform active:scale-95"
             >
               <Square className="w-4 h-4 fill-current" />
@@ -194,7 +218,7 @@ export const RecordingPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 p-6 rounded-2xl bg-card border border-border space-y-6">
           <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-            Recording Parameters
+            {t('recordingParameters')}
           </h3>
 
           {/* Directory Picker */}
@@ -206,7 +230,7 @@ export const RecordingPage: React.FC = () => {
               <input
                 type="text"
                 readOnly
-                value={settings.recordingsDir || 'Not configured'}
+                value={settings.recordingsDir || t('notConfigured')}
                 className="flex-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono"
               />
               <button
@@ -214,7 +238,7 @@ export const RecordingPage: React.FC = () => {
                 onClick={handleBrowseDir}
                 className="px-3 py-2 rounded-lg bg-surface-hover hover:bg-surface-active border border-border text-text-secondary text-xs font-medium"
               >
-                Browse...
+                {t('browse')}
               </button>
             </div>
           </div>
@@ -232,7 +256,7 @@ export const RecordingPage: React.FC = () => {
                 className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
               />
               <span className="text-[10px] text-text-muted block">
-                Tags: {'{device}'}, {'{date}'}, {'{time}'}
+                {t('fileNameTags')}
               </span>
             </div>
 
@@ -272,7 +296,7 @@ export const RecordingPage: React.FC = () => {
             </label>
 
             <label className="flex items-center gap-2 text-xs text-text-primary">
-              <span>Orientation</span>
+                <span>{t('recordOrientation')}</span>
               <select
                 value={recordOrientation}
                 onChange={(e) => setRecordOrientation(e.target.value)}
@@ -289,13 +313,17 @@ export const RecordingPage: React.FC = () => {
           {/* Start Recording Button */}
           {!activeRecording && (
             <button
-              onClick={handleStartRecording}
+              type="button"
+              onClick={() => void handleStartRecording()}
               disabled={!selectedDevice}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md transition-all transform active:scale-98 disabled:opacity-50"
             >
               <Video className="w-4 h-4" />
               <span>{t('startRecording')}</span>
             </button>
+          )}
+          {displayedRecordingError && (
+            <p role="alert" className="text-xs text-rose-400">{displayedRecordingError}</p>
           )}
         </div>
 
@@ -308,7 +336,7 @@ export const RecordingPage: React.FC = () => {
           {savedRecordings.length === 0 ? (
             <div className="p-8 text-center text-xs text-text-muted rounded-xl bg-surface border border-border space-y-2">
               <FileVideo className="w-6 h-6 mx-auto text-text-muted" />
-              <p>No recordings saved this session.</p>
+              <p>{t('noRecordingsThisSession')}</p>
             </div>
           ) : (
             <div className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -325,9 +353,11 @@ export const RecordingPage: React.FC = () => {
                   </div>
 
                   <button
-                    onClick={() => handleOpenFolder(settings.recordingsDir)}
+                    type="button"
+                    onClick={() => void handleOpenFolder(settings.recordingsDir)}
                     className="p-1.5 rounded-lg hover:bg-surface-hover text-text-secondary hover:text-text-primary"
                     title={t('showInExplorer')}
+                    aria-label={`${t('showInExplorer')}: ${rec.name}`}
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </button>

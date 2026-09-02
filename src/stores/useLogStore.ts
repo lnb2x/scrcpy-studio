@@ -19,6 +19,7 @@ export const useLogStore = create<LogStore>((set, get) => ({
   logs: [
     {
       timestamp: Date.now(),
+      source: 'SYSTEM',
       level: 'INFO',
       message: 'Scrcpy Studio initialized. Ready to control Android devices.',
       raw: 'Scrcpy Studio initialized.',

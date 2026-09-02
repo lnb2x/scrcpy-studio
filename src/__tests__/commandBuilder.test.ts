@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildScrcpyArgs, formatCommandString } from '../lib/commandBuilder';
 import { ScrcpyConfig } from '../types/scrcpy';
+import parityFixtures from '../../tests/scrcpy-command-fixtures.json';
+import {
+  appendCustomArguments,
+  validateCustomArgument,
+  validateScrcpyConfig,
+} from '../lib/scrcpyConfig';
 
 describe('Scrcpy Command Builder for scrcpy 4.1', () => {
   it('should build basic balanced mirror command', () => {
@@ -163,6 +169,46 @@ describe('Scrcpy Command Builder for scrcpy 4.1', () => {
   it('should quote an executable path containing spaces without adding a trailing space', () => {
     expect(formatCommandString('C:\\Program Files\\scrcpy\\scrcpy.exe', [])).toBe(
       '"C:\\Program Files\\scrcpy\\scrcpy.exe"'
+    );
+  });
+
+  it.each(parityFixtures)('matches the shared TypeScript/Rust fixture: $name', ({ config, expected }) => {
+    expect(buildScrcpyArgs(config as ScrcpyConfig)).toEqual(expected);
+  });
+
+  it('implements tunnel host and tunnel port regression coverage', () => {
+    expect(buildScrcpyArgs({ tunnelHost: ' 127.0.0.1 ', tunnelPort: 27183 })).toEqual([
+      '--tunnel-host=127.0.0.1',
+      '--tunnel-port=27183',
+    ]);
+  });
+
+  it('treats custom arguments as independent argv items and rejects shell commands', () => {
+    expect(validateCustomArgument('--background-color=#000000')).toBeNull();
+    expect(validateCustomArgument('--window-title=My Android')).toBeNull();
+    expect(validateCustomArgument('scrcpy --no-mipmaps')).not.toBeNull();
+    expect(validateCustomArgument('--serial device-1')).not.toBeNull();
+  });
+
+  it('deduplicates custom options by key and keeps typed options authoritative', () => {
+    expect(
+      appendCustomArguments(
+        ['--max-size=1600'],
+        ['--max-size=800', '--no-mipmaps', '--no-mipmaps=true']
+      )
+    ).toEqual(['--max-size=1600', '--no-mipmaps']);
+  });
+
+  it('validates expert settings and duplicate custom option keys', () => {
+    const issues = validateScrcpyConfig({
+      tunnelPort: 70000,
+      backgroundColor: 'black',
+      mouseBind: 'bad',
+      customArgs: ['--no-mipmaps', '--no-mipmaps=true'],
+    });
+
+    expect(issues.map((issue) => issue.field)).toEqual(
+      expect.arrayContaining(['tunnelPort', 'backgroundColor', 'mouseBind', 'customArgs'])
     );
   });
 });

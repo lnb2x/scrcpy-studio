@@ -70,14 +70,15 @@ export const CommandPreview: React.FC<CommandPreviewProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={handleCopy}
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface border border-transparent hover:border-border transition-colors font-medium"
-            title="Copy command string"
+            title={t('copyCommand')}
           >
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400 text-[11px]">Copied!</span>
+                <span className="text-emerald-400 text-[11px]">{t('copied')}</span>
               </>
             ) : (
               <>
@@ -91,14 +92,16 @@ export const CommandPreview: React.FC<CommandPreviewProps> = ({
             <div>
               {activeSession ? (
                 <button
+                  type="button"
                   onClick={() => stopSession(activeSession.id)}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold shadow-sm transition-all transform active:scale-95"
                 >
                   <Square className="w-3 h-3 fill-current" />
-                  <span>Stop</span>
+                  <span>{t('stop')}</span>
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={onRun}
                   disabled={!selectedDevice}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-sm transition-all transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"

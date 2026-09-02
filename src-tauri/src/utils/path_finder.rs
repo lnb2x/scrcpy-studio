@@ -13,6 +13,19 @@ pub struct ExecutableDetection {
     pub detected_locations: Vec<String>,
 }
 
+fn first_existing_file<I>(candidates: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    candidates.into_iter().find_map(|candidate| {
+        if candidate.is_file() {
+            Some(candidate.canonicalize().unwrap_or(candidate))
+        } else {
+            None
+        }
+    })
+}
+
 pub fn find_scrcpy() -> Option<PathBuf> {
     // 1. Check PATH
     if let Ok(path) = which("scrcpy") {
@@ -29,11 +42,8 @@ pub fn find_scrcpy() -> Option<PathBuf> {
         "tools/scrcpy.exe",
         "../scrcpy/scrcpy.exe",
     ];
-    for rel in relative_candidates {
-        let p = PathBuf::from(rel);
-        if p.exists() {
-            return Some(p.canonicalize().unwrap_or(p));
-        }
+    if let Some(path) = first_existing_file(relative_candidates.map(PathBuf::from)) {
+        return Some(path);
     }
 
     // 3. Check Windows specific locations
@@ -97,11 +107,8 @@ pub fn find_scrcpy() -> Option<PathBuf> {
         r"C:\ProgramData\chocolatey\bin\scrcpy.exe",
     ];
 
-    for root in standard_roots {
-        let p = PathBuf::from(root);
-        if p.exists() {
-            return Some(p);
-        }
+    if let Some(path) = first_existing_file(standard_roots.map(PathBuf::from)) {
+        return Some(path);
     }
 
     None
@@ -176,12 +183,33 @@ pub fn find_adb() -> Option<PathBuf> {
         r"C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe",
     ];
 
-    for root in standard_roots {
-        let p = PathBuf::from(root);
-        if p.exists() {
-            return Some(p);
-        }
+    if let Some(path) = first_existing_file(standard_roots.map(PathBuf::from)) {
+        return Some(path);
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_existing_file;
+
+    #[test]
+    fn runtime_path_detection_uses_first_existing_file() {
+        let directory =
+            std::env::temp_dir().join(format!("scrcpy-studio-runtime-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create runtime test directory");
+        let missing = directory.join("missing.exe");
+        let executable = directory.join("scrcpy.exe");
+        std::fs::write(&executable, b"fake executable").expect("create fake runtime");
+
+        let detected = first_existing_file([missing, executable.clone()]);
+        assert_eq!(
+            detected,
+            Some(executable.canonicalize().expect("canonical executable"))
+        );
+        assert!(first_existing_file([directory.join("still-missing.exe")]).is_none());
+
+        std::fs::remove_dir_all(&directory).expect("remove runtime test directory");
+    }
 }

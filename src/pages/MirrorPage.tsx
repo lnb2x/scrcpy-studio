@@ -12,9 +12,21 @@ import { useScrcpyStore } from '@/stores/useScrcpyStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useTranslation } from '@/lib/i18n';
-import { SMART_PRESETS } from '@/lib/commandBuilder';
+import { buildScrcpyArgs, SMART_PRESETS } from '@/lib/commandBuilder';
+import {
+  getScrcpyOptionKey,
+  validateCustomArgument,
+} from '@/lib/scrcpyConfig';
 import { CommandPreview } from '@/components/common/CommandPreview';
-import { EncoderInfoItem, VideoCodec, AudioCodec, InputMode, GamepadMode } from '@/types/scrcpy';
+import {
+  EncoderInfoItem,
+  VideoCodec,
+  AudioCodec,
+  AudioSource,
+  InputMode,
+  GamepadMode,
+  RenderFit,
+} from '@/types/scrcpy';
 
 type MirrorTab = 'video' | 'audio' | 'input' | 'window' | 'advanced';
 
@@ -29,6 +41,8 @@ export const MirrorPage: React.FC = () => {
   const [encoders, setEncoders] = useState<EncoderInfoItem[]>([]);
   const [isLoadingEncoders, setIsLoadingEncoders] = useState(false);
   const [customArgInput, setCustomArgInput] = useState('');
+  const [customArgError, setCustomArgError] = useState<string | null>(null);
+  const [isExpertMode, setIsExpertMode] = useState(false);
 
   const handleFetchEncoders = async () => {
     setIsLoadingEncoders(true);
@@ -45,11 +59,29 @@ export const MirrorPage: React.FC = () => {
   };
 
   const addCustomArg = () => {
-    if (!customArgInput.trim()) return;
-    const current = config.customArgs || [];
-    if (!current.includes(customArgInput.trim())) {
-      updateConfig({ customArgs: [...current, customArgInput.trim()] });
+    const argument = customArgInput.trim();
+    const validationError = validateCustomArgument(argument);
+    if (validationError) {
+      setCustomArgError(validationError);
+      return;
     }
+    const current = config.customArgs || [];
+    const optionKey = getScrcpyOptionKey(argument);
+    const typedOptionKeys = new Set(
+      buildScrcpyArgs({ ...config, customArgs: [] })
+        .filter((item) => item.startsWith('--'))
+        .map(getScrcpyOptionKey)
+    );
+    if (typedOptionKeys.has(optionKey)) {
+      setCustomArgError(`This option is already configured by a typed setting: ${optionKey}`);
+      return;
+    }
+    if (current.some((item) => getScrcpyOptionKey(item) === optionKey)) {
+      setCustomArgError(`Duplicate custom option: ${optionKey}`);
+      return;
+    }
+    updateConfig({ customArgs: [...current, argument] });
+    setCustomArgError(null);
     setCustomArgInput('');
   };
 
@@ -74,7 +106,11 @@ export const MirrorPage: React.FC = () => {
         {/* Basic vs Advanced Mode Toggle */}
         <div className="flex items-center gap-1 bg-surface p-1 rounded-xl border border-border self-start">
           <button
-            onClick={() => setConfigModeAdvanced(false)}
+            type="button"
+            onClick={() => {
+              setConfigModeAdvanced(false);
+              setIsExpertMode(false);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               !isConfigModeAdvanced
                 ? 'bg-card text-primary shadow-sm border border-border'
@@ -84,14 +120,33 @@ export const MirrorPage: React.FC = () => {
             {t('basicMode')}
           </button>
           <button
-            onClick={() => setConfigModeAdvanced(true)}
+            type="button"
+            onClick={() => {
+              setConfigModeAdvanced(true);
+              setIsExpertMode(false);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              isConfigModeAdvanced
+              isConfigModeAdvanced && !isExpertMode
                 ? 'bg-card text-primary shadow-sm border border-border'
                 : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             {t('advancedMode')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfigModeAdvanced(true);
+              setIsExpertMode(true);
+              setActiveTab('advanced');
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              isExpertMode
+                ? 'bg-card text-primary shadow-sm border border-border'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {t('expertMode')}
           </button>
         </div>
       </div>
@@ -116,7 +171,7 @@ export const MirrorPage: React.FC = () => {
               >
                 <span className="text-xs font-bold block truncate">{preset.name}</span>
                 <span className="text-[10px] text-text-muted block truncate mt-0.5">
-                  {preset.config.maxSize ? `${preset.config.maxSize}p` : 'Native'} • {preset.config.maxFps || 60}FPS
+                  {preset.config.maxSize ? `${preset.config.maxSize}p` : t('nativeResolution')} • {preset.config.maxFps || 60}FPS
                 </span>
               </button>
             );
@@ -207,11 +262,11 @@ export const MirrorPage: React.FC = () => {
                     onChange={(e) => updateConfig({ videoCodec: e.target.value as VideoCodec })}
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value="h264">H.264 / AVC (Default, highly compatible)</option>
-                    <option value="h265">H.265 / HEVC (High quality, lower bitrate)</option>
-                    <option value="av1">AV1 (Next-gen open standard)</option>
-                    <option value="vp8">VP8 (scrcpy 4.1)</option>
-                    <option value="vp9">VP9 (scrcpy 4.1)</option>
+                    <option value="h264">{t('codecH264Option')}</option>
+                    <option value="h265">{t('codecH265Option')}</option>
+                    <option value="av1">{t('codecAv1Option')}</option>
+                    <option value="vp8">{t('codecVp8Option')}</option>
+                    <option value="vp9">{t('codecVp9Option')}</option>
                   </select>
                 </div>
 
@@ -225,13 +280,13 @@ export const MirrorPage: React.FC = () => {
                     onChange={(e) => updateConfig({ maxSize: Number(e.target.value) })}
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value={0}>Native Device Resolution</option>
-                    <option value={2560}>2560p (2K Ultra)</option>
-                    <option value={1920}>1920p (Full HD)</option>
-                    <option value={1600}>1600p (Balanced)</option>
-                    <option value={1280}>1280p (HD)</option>
-                    <option value={1024}>1024p (Fast)</option>
-                    <option value={800}>800p (Low end)</option>
+                    <option value={0}>{t('nativeDeviceResolution')}</option>
+                    <option value={2560}>{t('resolution2k')}</option>
+                    <option value={1920}>{t('resolutionFullHd')}</option>
+                    <option value={1600}>{t('resolutionBalanced')}</option>
+                    <option value={1280}>{t('resolutionHd')}</option>
+                    <option value={1024}>{t('resolutionFast')}</option>
+                    <option value={800}>{t('resolutionLowEnd')}</option>
                   </select>
                 </div>
 
@@ -295,7 +350,7 @@ export const MirrorPage: React.FC = () => {
                         className="text-[11px] text-primary hover:underline flex items-center gap-1"
                       >
                         <RefreshCw className={`w-3 h-3 ${isLoadingEncoders ? 'animate-spin' : ''}`} />
-                        List Encoders
+                        {t('listEncoders')}
                       </button>
                     </div>
 
@@ -303,7 +358,7 @@ export const MirrorPage: React.FC = () => {
                       type="text"
                       value={config.videoEncoder || ''}
                       onChange={(e) => updateConfig({ videoEncoder: e.target.value })}
-                      placeholder="Auto (e.g. c2.android.avc.encoder)"
+                      placeholder={t('encoderAutoPlaceholder')}
                       className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-primary"
                     />
 
@@ -344,7 +399,7 @@ export const MirrorPage: React.FC = () => {
                       type="number"
                       value={config.videoBuffer || 0}
                       onChange={(e) => updateConfig({ videoBuffer: Number(e.target.value) })}
-                      placeholder="0 (no buffer)"
+                      placeholder={t('noBufferPlaceholder')}
                       className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
                     />
                   </div>
@@ -379,7 +434,7 @@ export const MirrorPage: React.FC = () => {
                     {t('forwardAudio')}
                   </span>
                   <span className="text-[11px] text-text-muted mt-0.5 block">
-                    Forward device sound to computer speakers (requires Android 11+)
+                    {t('forwardAudioDescription')}
                   </span>
                 </div>
                 <input
@@ -399,15 +454,21 @@ export const MirrorPage: React.FC = () => {
                     <select
                       value={config.audioSource || 'output'}
                       onChange={(e) =>
-                        updateConfig({ audioSource: e.target.value as any })
+                        updateConfig({ audioSource: e.target.value as AudioSource })
                       }
                       className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                     >
-                      <option value="output">Output (Standard device playback)</option>
-                      <option value="playback">Playback (Apps playback only)</option>
-                      <option value="mic">Microphone</option>
-                      <option value="voice-call">Voice Call</option>
-                      <option value="voice-performance">Performance / Karaoke</option>
+                      <option value="output">{t('audioOutputSource')}</option>
+                      <option value="playback">{t('audioPlaybackSource')}</option>
+                      <option value="mic">{t('microphone')}</option>
+                      <option value="mic-unprocessed">{t('microphoneUnprocessed')}</option>
+                      <option value="mic-camcorder">{t('microphoneCamcorder')}</option>
+                      <option value="mic-voice-recognition">{t('microphoneVoiceRecognition')}</option>
+                      <option value="mic-voice-communication">{t('microphoneVoiceCommunication')}</option>
+                      <option value="voice-call">{t('voiceCall')}</option>
+                      <option value="voice-call-uplink">{t('voiceCallUplink')}</option>
+                      <option value="voice-call-downlink">{t('voiceCallDownlink')}</option>
+                      <option value="voice-performance">{t('voicePerformance')}</option>
                     </select>
                   </div>
 
@@ -422,9 +483,9 @@ export const MirrorPage: React.FC = () => {
                       }
                       className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                     >
-                      <option value="opus">Opus (Recommended)</option>
+                      <option value="opus">Opus ({t('recommended')})</option>
                       <option value="aac">AAC</option>
-                      <option value="flac">FLAC (Lossless)</option>
+                      <option value="flac">FLAC ({t('lossless')})</option>
                       <option value="raw">RAW PCM</option>
                     </select>
                   </div>
@@ -439,8 +500,8 @@ export const MirrorPage: React.FC = () => {
                       className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                     >
                       <option value="64K">64 Kbps</option>
-                      <option value="128K">128 Kbps (Default)</option>
-                      <option value="192K">192 Kbps (High Quality)</option>
+                      <option value="128K">128 Kbps ({t('defaultLabel')})</option>
+                      <option value="192K">192 Kbps ({t('highQuality')})</option>
                       <option value="256K">256 Kbps</option>
                     </select>
                   </div>
@@ -464,10 +525,10 @@ export const MirrorPage: React.FC = () => {
                     }
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value="sdk">SDK (Standard Android API)</option>
-                    <option value="uhid">UHID (Simulate physical HID keyboard)</option>
-                    <option value="aoa">AOA (AOAv2 USB protocol)</option>
-                    <option value="disabled">Disabled</option>
+                    <option value="sdk">{t('sdkKeyboardMode')}</option>
+                    <option value="uhid">{t('uhidKeyboardMode')}</option>
+                    <option value="aoa">{t('aoaKeyboardMode')}</option>
+                    <option value="disabled">{t('disabled')}</option>
                   </select>
                 </div>
 
@@ -482,10 +543,10 @@ export const MirrorPage: React.FC = () => {
                     }
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value="sdk">SDK (Standard Touch/Mouse)</option>
-                    <option value="uhid">UHID (Physical USB Mouse)</option>
-                    <option value="aoa">AOA (AOAv2 Mouse)</option>
-                    <option value="disabled">Disabled</option>
+                    <option value="sdk">{t('sdkMouseMode')}</option>
+                    <option value="uhid">{t('uhidMouseMode')}</option>
+                    <option value="aoa">{t('aoaMouseMode')}</option>
+                    <option value="disabled">{t('disabled')}</option>
                   </select>
                 </div>
 
@@ -500,9 +561,9 @@ export const MirrorPage: React.FC = () => {
                     }
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value="disabled">Disabled</option>
-                    <option value="uhid">UHID (Simulate Gamepad)</option>
-                    <option value="aoa">AOA (AOAv2 Gamepad)</option>
+                    <option value="disabled">{t('disabled')}</option>
+                    <option value="uhid">{t('uhidGamepadMode')}</option>
+                    <option value="aoa">{t('aoaGamepadMode')}</option>
                   </select>
                 </div>
               </div>
@@ -520,7 +581,7 @@ export const MirrorPage: React.FC = () => {
                     <span className="text-xs font-semibold text-text-primary block">
                       {t('turnScreenOffOnStart')}
                     </span>
-                    <span className="text-[10px] text-text-muted block">Saves phone battery</span>
+                    <span className="text-[10px] text-text-muted block">{t('savesPhoneBattery')}</span>
                   </div>
                 </label>
 
@@ -535,7 +596,7 @@ export const MirrorPage: React.FC = () => {
                     <span className="text-xs font-semibold text-text-primary block">
                       {t('stayAwake')}
                     </span>
-                    <span className="text-[10px] text-text-muted block">Prevent device sleep</span>
+                    <span className="text-[10px] text-text-muted block">{t('preventsDeviceSleep')}</span>
                   </div>
                 </label>
 
@@ -550,7 +611,7 @@ export const MirrorPage: React.FC = () => {
                     <span className="text-xs font-semibold text-text-primary block">
                       {t('showTouches')}
                     </span>
-                    <span className="text-[10px] text-text-muted block">Draw touch circles</span>
+                    <span className="text-[10px] text-text-muted block">{t('drawsTouchCircles')}</span>
                   </div>
                 </label>
 
@@ -565,7 +626,7 @@ export const MirrorPage: React.FC = () => {
                     <span className="text-xs font-semibold text-text-primary block">
                       {t('clipboardAutosync')}
                     </span>
-                    <span className="text-[10px] text-text-muted block">Sync Ctrl+C / Ctrl+V</span>
+                    <span className="text-[10px] text-text-muted block">{t('syncClipboardShortcut')}</span>
                   </div>
                 </label>
 
@@ -580,7 +641,7 @@ export const MirrorPage: React.FC = () => {
                     <span className="text-xs font-semibold text-text-primary block">
                       {t('legacyPaste')}
                     </span>
-                    <span className="text-[10px] text-text-muted block">Inject keystrokes for paste</span>
+                    <span className="text-[10px] text-text-muted block">{t('injectPasteKeystrokes')}</span>
                   </div>
                 </label>
               </div>
@@ -642,12 +703,12 @@ export const MirrorPage: React.FC = () => {
                   </label>
                   <select
                     value={config.renderFit || 'letterbox'}
-                    onChange={(e) => updateConfig({ renderFit: e.target.value as any })}
+                    onChange={(e) => updateConfig({ renderFit: e.target.value as RenderFit })}
                     className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                   >
-                    <option value="letterbox">Letterbox (Preserve aspect ratio)</option>
-                    <option value="stretched">Stretched (Fill window)</option>
-                    <option value="unscaled">Unscaled (1:1 pixel rendering)</option>
+                    <option value="letterbox">{t('renderLetterbox')}</option>
+                    <option value="stretched">{t('renderStretched')}</option>
+                    <option value="unscaled">{t('renderUnscaled')}</option>
                   </select>
                 </div>
               </div>
@@ -657,21 +718,190 @@ export const MirrorPage: React.FC = () => {
           {/* ADVANCED TAB */}
           {activeTab === 'advanced' && isConfigModeAdvanced && (
             <div className="space-y-6">
+              {isExpertMode && (
+                <div className="space-y-5 pb-6 border-b border-border">
+                  <div>
+                    <h4 className="text-xs font-semibold text-text-primary mb-1">
+                      {t('expertOptions')}
+                    </h4>
+                    <p className="text-xs text-text-secondary">
+                      {t('expertOptionsDescription')}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('videoCodecOptions')}</span>
+                      <input
+                        type="text"
+                        value={config.videoCodecOptions ?? ''}
+                        onChange={(event) => updateConfig({ videoCodecOptions: event.target.value })}
+                        placeholder="profile:long=1,level=2"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('audioCodecOptions')}</span>
+                      <input
+                        type="text"
+                        value={config.audioCodecOptions ?? ''}
+                        onChange={(event) => updateConfig({ audioCodecOptions: event.target.value })}
+                        placeholder="bitrate-mode:int=2"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('audioOutputBuffer')}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={config.audioOutputBuffer ?? 10}
+                        onChange={(event) => updateConfig({ audioOutputBuffer: Number(event.target.value) })}
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('screenOffTimeout')}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={config.screenOffTimeout ?? ''}
+                        onChange={(event) =>
+                          updateConfig({
+                            screenOffTimeout: event.target.value === '' ? undefined : Number(event.target.value),
+                          })
+                        }
+                        placeholder="300"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('displayImePolicy')}</span>
+                      <select
+                        value={config.displayImePolicy ?? ''}
+                        onChange={(event) =>
+                          updateConfig({
+                            displayImePolicy:
+                              event.target.value === ''
+                                ? undefined
+                                : (event.target.value as 'local' | 'fallback' | 'hide'),
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:outline-none focus:border-primary"
+                      >
+                        <option value="">{t('displayImeDefault')}</option>
+                        <option value="local">{t('displayImeLocal')}</option>
+                        <option value="fallback">{t('displayImeFallback')}</option>
+                        <option value="hide">{t('displayImeHide')}</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('mouseBind')}</span>
+                      <input
+                        type="text"
+                        value={config.mouseBind ?? ''}
+                        onChange={(event) => updateConfig({ mouseBind: event.target.value })}
+                        placeholder="bhsn:++++"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('shortcutMod')}</span>
+                      <input
+                        type="text"
+                        value={config.shortcutMod ?? ''}
+                        onChange={(event) => updateConfig({ shortcutMod: event.target.value })}
+                        placeholder="lalt,lsuper"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('backgroundColor')}</span>
+                      <input
+                        type="text"
+                        value={config.backgroundColor ?? ''}
+                        onChange={(event) => updateConfig({ backgroundColor: event.target.value })}
+                        placeholder="#222222"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('tunnelHost')}</span>
+                      <input
+                        type="text"
+                        value={config.tunnelHost ?? ''}
+                        onChange={(event) => updateConfig({ tunnelHost: event.target.value })}
+                        placeholder="127.0.0.1"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1.5 text-xs text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('tunnelPort')}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={config.tunnelPort ?? ''}
+                        onChange={(event) =>
+                          updateConfig({
+                            tunnelPort: event.target.value === '' ? undefined : Number(event.target.value),
+                          })
+                        }
+                        placeholder="27183"
+                        className="w-full px-3 py-2 rounded-lg bg-surface border border-border font-mono focus:outline-none focus:border-primary"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {([
+                      ['keepActive', 'keepActive'],
+                      ['noMouseHover', 'disableMouseHover'],
+                      ['noWindow', 'disableScrcpyWindow'],
+                      ['noWindowAspectRatioLock', 'disableAspectRatioLock'],
+                      ['noMipmaps', 'disableMipmaps'],
+                      ['noDownsizeOnError', 'disableDownsizeOnError'],
+                      ['noCleanup', 'disableCleanup'],
+                      ['noVideoPlayback', 'disableVideoPlayback'],
+                      ['noAudioPlayback', 'disableAudioPlayback'],
+                    ] as const).map(([key, labelKey]) => (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2.5 p-3 rounded-xl bg-surface border border-border cursor-pointer text-xs text-text-primary"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={config[key] === true}
+                          onChange={(event) => updateConfig({ [key]: event.target.checked })}
+                          className="rounded text-primary focus:ring-0"
+                        />
+                        <span>{t(labelKey)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h4 className="text-xs font-semibold text-text-primary mb-1">
-                  Custom Raw scrcpy Arguments
+                  {t('customArguments')}
                 </h4>
                 <p className="text-xs text-text-secondary mb-4">
-                  Add additional arguments passed directly to the scrcpy command line.
+                  {t('customArgumentsDescription')}
                 </p>
 
                 <div className="flex gap-2 mb-4">
                   <input
                     type="text"
                     value={customArgInput}
-                    onChange={(e) => setCustomArgInput(e.target.value)}
+                    onChange={(e) => {
+                      setCustomArgInput(e.target.value);
+                      setCustomArgError(null);
+                    }}
                     onKeyDown={(e) => e.key === 'Enter' && addCustomArg()}
-                    placeholder="e.g. --display-buffer=50 or --crop=1080:2000:0:100"
+                    placeholder="--no-mipmaps"
+                    aria-invalid={customArgError !== null}
+                    aria-describedby="custom-argument-error"
                     className="flex-1 px-3 py-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
                   />
                   <button
@@ -679,9 +909,15 @@ export const MirrorPage: React.FC = () => {
                     onClick={addCustomArg}
                     className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold"
                   >
-                    Add Arg
+                    {t('addArgument')}
                   </button>
                 </div>
+
+                {customArgError && (
+                  <p id="custom-argument-error" role="alert" className="text-xs text-rose-400 mb-3">
+                    {customArgError}
+                  </p>
+                )}
 
                 {config.customArgs && config.customArgs.length > 0 && (
                   <div className="flex flex-wrap gap-2">
@@ -692,7 +928,9 @@ export const MirrorPage: React.FC = () => {
                       >
                         <span>{arg}</span>
                         <button
+                          type="button"
                           onClick={() => removeCustomArg(idx)}
+                          aria-label={`${t('removeArgument')} ${arg}`}
                           className="hover:text-rose-400 ml-1"
                         >
                           ×

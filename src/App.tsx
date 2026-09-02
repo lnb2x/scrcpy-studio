@@ -1,31 +1,40 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Toaster } from 'sonner';
+import { Loader2 } from 'lucide-react';
 import { TitleBar } from './components/layout/TitleBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { StatusBar } from './components/layout/StatusBar';
 import { CommandPalette } from './components/common/CommandPalette';
+import { ShortcutsOverlay } from './components/common/ShortcutsOverlay';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
-
-import { DashboardPage } from './pages/DashboardPage';
-import { DevicesPage } from './pages/DevicesPage';
-import { MirrorPage } from './pages/MirrorPage';
-import { CameraPage } from './pages/CameraPage';
-import { RecordingPage } from './pages/RecordingPage';
-import { WirelessPage } from './pages/WirelessPage';
-import { ProfilesPage } from './pages/ProfilesPage';
-import { AdbToolsPage } from './pages/AdbToolsPage';
-import { LogsPage } from './pages/LogsPage';
-import { SettingsPage } from './pages/SettingsPage';
 
 import { useUiStore } from './stores/useUiStore';
 import { useDeviceStore } from './stores/useDeviceStore';
 import { useScrcpyStore } from './stores/useScrcpyStore';
 import { useSettingsStore } from './stores/useSettingsStore';
 
+// Pages are code-split so each tab only loads its own chunk on first visit.
+const PAGES: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  dashboard: React.lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))),
+  devices: React.lazy(() => import('./pages/DevicesPage').then((m) => ({ default: m.DevicesPage }))),
+  mirror: React.lazy(() => import('./pages/MirrorPage').then((m) => ({ default: m.MirrorPage }))),
+  camera: React.lazy(() => import('./pages/CameraPage').then((m) => ({ default: m.CameraPage }))),
+  recording: React.lazy(() => import('./pages/RecordingPage').then((m) => ({ default: m.RecordingPage }))),
+  wireless: React.lazy(() => import('./pages/WirelessPage').then((m) => ({ default: m.WirelessPage }))),
+  files: React.lazy(() => import('./pages/FilesPage').then((m) => ({ default: m.FilesPage }))),
+  profiles: React.lazy(() => import('./pages/ProfilesPage').then((m) => ({ default: m.ProfilesPage }))),
+  adbTools: React.lazy(() => import('./pages/AdbToolsPage').then((m) => ({ default: m.AdbToolsPage }))),
+  logs: React.lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage }))),
+  settings: React.lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage }))),
+};
+
 export const App: React.FC = () => {
-  const { activeTab, setActiveTab } = useUiStore();
+  const { activeTab, setActiveTab, toggleSidebar } = useUiStore();
   const { fetchDevices } = useDeviceStore();
   const { initEventListener, startSession } = useScrcpyStore();
   const { loadSettings, settings } = useSettingsStore();
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
 
   useEffect(() => {
     void loadSettings();
@@ -47,12 +56,28 @@ export const App: React.FC = () => {
       // Ctrl + R: Refresh devices
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r' && !e.shiftKey) {
         e.preventDefault();
-        fetchDevices();
+        void fetchDevices();
+      }
+      // Ctrl + B: Toggle sidebar
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+      // ? (Shift + /): Shortcuts overlay — skip while typing in inputs
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        const isTyping =
+          target &&
+          (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        if (!isTyping) {
+          e.preventDefault();
+          setIsShortcutsOpen(true);
+        }
       }
       // Ctrl + Shift + M: Start Mirror
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        startSession();
+        void startSession();
       }
       // Ctrl + Shift + R: Start Recording / Open Recording Studio
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
@@ -68,34 +93,9 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleGlobalShortcuts);
     return () => window.removeEventListener('keydown', handleGlobalShortcuts);
-  }, [fetchDevices, startSession, setActiveTab]);
+  }, [fetchDevices, startSession, setActiveTab, toggleSidebar]);
 
-  const renderActivePage = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <DashboardPage />;
-      case 'devices':
-        return <DevicesPage />;
-      case 'mirror':
-        return <MirrorPage />;
-      case 'camera':
-        return <CameraPage />;
-      case 'recording':
-        return <RecordingPage />;
-      case 'wireless':
-        return <WirelessPage />;
-      case 'profiles':
-        return <ProfilesPage />;
-      case 'adbTools':
-        return <AdbToolsPage />;
-      case 'logs':
-        return <LogsPage />;
-      case 'settings':
-        return <SettingsPage />;
-      default:
-        return <DashboardPage />;
-    }
-  };
+  const ActivePage = PAGES[activeTab] ?? PAGES.dashboard;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-text-primary overflow-hidden select-none font-sans">
@@ -109,7 +109,26 @@ export const App: React.FC = () => {
 
         {/* Dynamic Page Content */}
         <main className="flex-1 overflow-y-auto bg-background/50">
-          {renderActivePage()}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              className="min-h-full"
+            >
+              <Suspense
+                fallback={
+                  <div className="h-64 flex items-center justify-center text-text-muted">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                }
+              >
+                <ActivePage />
+              </Suspense>
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
@@ -118,6 +137,16 @@ export const App: React.FC = () => {
 
       {/* Command Palette (Ctrl+K) */}
       <CommandPalette />
+
+      {/* Keyboard Shortcuts Overlay (?) */}
+      <ShortcutsOverlay isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+
+      {/* Toast notifications */}
+      <Toaster
+        position="bottom-right"
+        theme={settings.theme === 'light' ? 'light' : 'dark'}
+        duration={4000}
+      />
 
       {/* First Launch Onboarding Wizard */}
       <OnboardingModal />

@@ -1,9 +1,18 @@
-use crate::models::{AndroidDevice, AppError, AppResult, BatteryInfo, ConnectionType, DeviceInfo};
-use crate::utils::{find_adb, parse_adb_devices, parse_dumpsys_battery, parse_getprop_output};
+use crate::models::{
+    AndroidDevice, AppError, AppResult, BatteryInfo, ConnectionType, DeviceInfo, MdnsService,
+    RemoteFileEntry,
+};
+use crate::utils::{
+    find_adb, parse_adb_devices, parse_adb_mdns_services, parse_dumpsys_battery,
+    parse_getprop_output, parse_ls_output,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
+
+/// Paths that must never be deleted through the file explorer.
+const PROTECTED_REMOTE_PATHS: [&str; 3] = ["/", "/sdcard", "/storage"];
 
 #[derive(Clone)]
 pub struct AdbService {
@@ -24,12 +33,18 @@ impl AdbService {
     }
 
     pub fn set_custom_path(&self, path: Option<PathBuf>) {
-        let mut p = self.custom_adb_path.lock().unwrap();
+        let mut p = self
+            .custom_adb_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *p = path;
     }
 
     pub fn get_adb_path(&self) -> AppResult<PathBuf> {
-        let custom = self.custom_adb_path.lock().unwrap();
+        let custom = self
+            .custom_adb_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(ref p) = *custom {
             if p.exists() {
                 return Ok(p.clone());
@@ -69,6 +84,16 @@ impl AdbService {
             } else {
                 "No output"
             };
+            let normalized = details.to_ascii_lowercase();
+            if normalized.contains("unauthorized") {
+                return Err(AppError::DeviceUnauthorized(details.to_string()));
+            }
+            if normalized.contains("offline") {
+                return Err(AppError::DeviceOffline(details.to_string()));
+            }
+            if normalized.contains("device") && normalized.contains("not found") {
+                return Err(AppError::DeviceNotFound(details.to_string()));
+            }
             return Err(AppError::CommandFailed(format!(
                 "ADB command failed with exit code {:?}: {}",
                 output.status.code(),
@@ -107,6 +132,11 @@ impl AdbService {
         }
 
         Ok(devices)
+    }
+
+    pub fn discover_mdns_services(&self) -> AppResult<Vec<MdnsService>> {
+        self.execute(&["mdns", "services"])
+            .map(|output| parse_adb_mdns_services(&output))
     }
 
     pub fn get_device_properties(&self, serial: &str) -> AppResult<HashMap<String, String>> {
@@ -235,6 +265,8 @@ impl AdbService {
         local_path: &str,
         remote_path: &str,
     ) -> AppResult<String> {
+        validate_local_file(local_path, None)?;
+        validate_remote_path(remote_path)?;
         let out = self.execute_for_device(serial, &["push", local_path, remote_path])?;
         Ok(out.trim().to_string())
     }
@@ -245,6 +277,15 @@ impl AdbService {
         remote_path: &str,
         local_path: &str,
     ) -> AppResult<String> {
+        validate_remote_path(remote_path)?;
+        let target = PathBuf::from(local_path.trim());
+        let valid_parent = target.parent().is_some_and(|parent| parent.is_dir());
+        if !target.is_absolute() || target.file_name().is_none() || !valid_parent {
+            return Err(AppError::InvalidArgument(format!(
+                "Local destination must be an absolute path in an existing directory: {}",
+                local_path
+            )));
+        }
         let out = self.execute_for_device(serial, &["pull", remote_path, local_path])?;
         Ok(out.trim().to_string())
     }
@@ -257,6 +298,8 @@ impl AdbService {
         downgrade: bool,
         grant_permissions: bool,
     ) -> AppResult<String> {
+        validate_local_file(apk_path, Some("apk"))?;
+
         let mut args = vec!["install"];
         if reinstall {
             args.push("-r");
@@ -278,6 +321,17 @@ impl AdbService {
     }
 
     pub fn take_screenshot(&self, serial: &str, target_path: &str) -> AppResult<String> {
+        let target = std::path::Path::new(target_path);
+        let is_png = target
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("png"));
+        if !target.is_absolute() || !is_png {
+            return Err(AppError::InvalidArgument(
+                "Screenshot target must be an absolute .png path".to_string(),
+            ));
+        }
+
         let adb_path = self.get_adb_path()?;
 
         #[cfg(target_os = "windows")]
@@ -301,8 +355,16 @@ impl AdbService {
             ));
         }
 
-        if let Some(parent) = std::path::Path::new(target_path).parent() {
-            let _ = std::fs::create_dir_all(parent);
+        if !output.stdout.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err(AppError::CommandFailed(
+                "ADB returned invalid screenshot data".to_string(),
+            ));
+        }
+
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                AppError::Io(format!("Failed to create screenshot directory: {}", error))
+            })?;
         }
 
         std::fs::write(target_path, &output.stdout)
@@ -315,6 +377,12 @@ impl AdbService {
         let mut args = vec!["reboot"];
         if let Some(m) = mode {
             if !m.is_empty() {
+                if !matches!(m, "recovery" | "bootloader" | "fastboot") {
+                    return Err(AppError::InvalidArgument(format!(
+                        "Unsupported reboot mode: {}",
+                        m
+                    )));
+                }
                 args.push(m);
             }
         }
@@ -340,11 +408,203 @@ impl AdbService {
         Ok(pkgs)
     }
 
+    pub fn launch_app(&self, serial: &str, package: &str) -> AppResult<String> {
+        if !is_safe_package_name(package) {
+            return Err(AppError::InvalidArgument(format!(
+                "Invalid package name: {}",
+                package
+            )));
+        }
+
+        let out = self.execute_for_device(
+            serial,
+            &[
+                "shell",
+                "monkey",
+                "-p",
+                package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ],
+        )?;
+        let normalized = out.to_ascii_lowercase();
+        if normalized.contains("no activities found") || normalized.contains("aborted") {
+            return Err(AppError::CommandFailed(format!(
+                "Package {} has no launchable activity",
+                package
+            )));
+        }
+        Ok(format!("Launched {}", package))
+    }
+
+    pub fn uninstall_app(&self, serial: &str, package: &str) -> AppResult<String> {
+        if !is_safe_package_name(package) {
+            return Err(AppError::InvalidArgument(format!(
+                "Invalid package name: {}",
+                package
+            )));
+        }
+
+        let out = self.execute_for_device(serial, &["uninstall", package])?;
+        let normalized = out.to_ascii_lowercase();
+        if !normalized.contains("success") {
+            return Err(AppError::CommandFailed(out.trim().to_string()));
+        }
+        Ok(format!("Uninstalled {}", package))
+    }
+
+    pub fn list_directory(&self, serial: &str, path: &str) -> AppResult<Vec<RemoteFileEntry>> {
+        validate_remote_path(path)?;
+        let quoted = shell_quote(path);
+        let out = self.execute_for_device(serial, &["shell", "ls", "-la", &quoted])?;
+        Ok(parse_ls_output(&out))
+    }
+
+    pub fn make_directory(&self, serial: &str, path: &str) -> AppResult<String> {
+        validate_remote_path(path)?;
+        let quoted = shell_quote(path);
+        self.execute_for_device(serial, &["shell", "mkdir", &quoted])
+            .map(|_| format!("Created {}", path))
+    }
+
+    pub fn delete_path(&self, serial: &str, path: &str, recursive: bool) -> AppResult<String> {
+        validate_remote_path(path)?;
+        let normalized = path.trim_end_matches('/');
+        if normalized.is_empty() {
+            return Err(AppError::InvalidArgument(
+                "Refusing to delete the filesystem root".to_string(),
+            ));
+        }
+        if PROTECTED_REMOTE_PATHS.contains(&normalized) {
+            return Err(AppError::InvalidArgument(format!(
+                "Refusing to delete protected path: {}",
+                normalized
+            )));
+        }
+        if !normalized.starts_with("/sdcard/") && !normalized.starts_with("/storage/") {
+            return Err(AppError::InvalidArgument(format!(
+                "Refusing to delete outside shared storage: {}",
+                normalized
+            )));
+        }
+
+        let quoted = shell_quote(normalized);
+        let args = if recursive {
+            vec!["shell", "rm", "-rf", &quoted]
+        } else {
+            vec!["shell", "rm", "-f", &quoted]
+        };
+        self.execute_for_device(serial, &args)
+            .map(|_| format!("Deleted {}", normalized))
+    }
+
     pub fn start_server(&self) -> AppResult<String> {
         self.execute(&["start-server"])
     }
 
     pub fn kill_server(&self) -> AppResult<String> {
         self.execute(&["kill-server"])
+    }
+}
+
+/// Wraps a remote path in double quotes so `adb shell` treats it as one token
+/// even when it contains spaces or shell metacharacters.
+fn shell_quote(path: &str) -> String {
+    let escaped = path
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
+    format!("\"{}\"", escaped)
+}
+
+/// Accepts only characters that can appear in a valid Android package name,
+/// rejecting anything that could inject extra shell tokens.
+fn is_safe_package_name(package: &str) -> bool {
+    !package.is_empty()
+        && package
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+}
+
+fn validate_local_file(path: &str, required_extension: Option<&str>) -> AppResult<PathBuf> {
+    let candidate = PathBuf::from(path.trim());
+    if !candidate.is_absolute() || !candidate.is_file() {
+        return Err(AppError::InvalidArgument(format!(
+            "Local file does not exist or is not an absolute file path: {}",
+            path
+        )));
+    }
+
+    if let Some(extension) = required_extension {
+        let matches = candidate
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case(extension));
+        if !matches {
+            return Err(AppError::InvalidArgument(format!(
+                "Expected a .{} file: {}",
+                extension, path
+            )));
+        }
+    }
+
+    Ok(candidate)
+}
+
+fn validate_remote_path(path: &str) -> AppResult<()> {
+    let trimmed = path.trim();
+    let has_traversal = trimmed
+        .split('/')
+        .any(|segment| segment == "." || segment == "..");
+    let has_control_character = trimmed.chars().any(char::is_control);
+    if !trimmed.starts_with('/') || has_traversal || has_control_character {
+        return Err(AppError::InvalidArgument(
+            "Remote path must be an absolute Android path".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_quote_wraps_and_escapes() {
+        assert_eq!(shell_quote("/sdcard"), "\"/sdcard\"");
+        assert_eq!(shell_quote("/sdcard/My Files"), "\"/sdcard/My Files\"");
+        assert_eq!(shell_quote("a\"b"), "\"a\\\"b\"");
+        assert_eq!(shell_quote("a$b`c"), "\"a\\$b\\`c\"");
+    }
+
+    #[test]
+    fn is_safe_package_name_rejects_injection() {
+        assert!(is_safe_package_name("com.example.app_1"));
+        assert!(!is_safe_package_name("com.example; rm -rf /"));
+        assert!(!is_safe_package_name(""));
+        assert!(!is_safe_package_name("com.example && id"));
+    }
+
+    #[test]
+    fn validate_remote_path_rejects_relative_and_multiline_values() {
+        assert!(validate_remote_path("/sdcard/Download/").is_ok());
+        assert!(validate_remote_path("sdcard/Download/").is_err());
+        assert!(validate_remote_path("/sdcard/Download/\nnext").is_err());
+        assert!(validate_remote_path("/sdcard/../system").is_err());
+    }
+
+    #[test]
+    fn validate_local_file_rejects_missing_and_wrong_extension() {
+        let missing = std::env::temp_dir().join("scrcpy-studio-missing.apk");
+        assert!(validate_local_file(missing.to_string_lossy().as_ref(), Some("apk")).is_err());
+
+        let current_executable = std::env::current_exe().expect("current executable path");
+        assert!(validate_local_file(current_executable.to_string_lossy().as_ref(), None).is_ok());
+        assert!(
+            validate_local_file(current_executable.to_string_lossy().as_ref(), Some("apk"))
+                .is_err()
+        );
     }
 }

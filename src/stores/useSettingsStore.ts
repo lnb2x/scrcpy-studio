@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { AppSettings } from '../types/settings';
 import { useI18nStore } from '../lib/i18n';
 import { readStoredObject, writeStoredJson } from '../lib/storage';
+import type { EnvironmentDiagnostics, RuntimeComponent } from '../types/runtime';
+import { formatAppError } from '@/lib/errors';
 
 interface ExecutableDetection {
   scrcpyPath?: string;
@@ -17,12 +19,18 @@ interface ExecutableDetection {
 interface SettingsStore {
   settings: AppSettings;
   detection: ExecutableDetection | null;
+  diagnostics: EnvironmentDiagnostics | null;
   isDetecting: boolean;
+  isRepairing: boolean;
   isHydrated: boolean;
+  runtimeError: string | null;
 
   updateSettings: (partial: Partial<AppSettings>) => void;
   loadSettings: () => Promise<void>;
   detectExecutables: () => Promise<ExecutableDetection>;
+  checkRuntime: () => Promise<EnvironmentDiagnostics | null>;
+  testRuntime: (component: 'scrcpy' | 'adb') => Promise<RuntimeComponent | null>;
+  repairRuntime: () => Promise<EnvironmentDiagnostics | null>;
   setCustomScrcpyPath: (path: string) => Promise<boolean>;
   setCustomAdbPath: (path: string) => Promise<boolean>;
 }
@@ -56,8 +64,11 @@ let loadSettingsPromise: Promise<void> | null = null;
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: { ...DEFAULT_SETTINGS },
   detection: null,
+  diagnostics: null,
   isDetecting: false,
+  isRepairing: false,
   isHydrated: false,
+  runtimeError: null,
 
   updateSettings: (partial) => {
     set((state) => {
@@ -136,6 +147,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         const detection = await get().detectExecutables();
         if (!scrcpyPathRestored && detection.scrcpyPath) loaded.scrcpyPath = detection.scrcpyPath;
         if (!adbPathRestored && detection.adbPath) loaded.adbPath = detection.adbPath;
+        await get().checkRuntime();
 
         get().updateSettings(loaded);
       } catch (error) {
@@ -153,25 +165,73 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   detectExecutables: async () => {
-    set({ isDetecting: true });
+    set({ isDetecting: true, runtimeError: null });
     try {
       const det = await invoke<ExecutableDetection>('detect_executables');
       set({ detection: det, isDetecting: false });
       return det;
-    } catch {
+    } catch (error) {
       set({ isDetecting: false });
       const emptyDet: ExecutableDetection = {
         isScrcpyReady: false,
         isAdbReady: false,
         detectedLocations: [],
       };
-      set({ detection: emptyDet });
+      set({ detection: emptyDet, runtimeError: formatAppError(error, 'RUNTIME_DETECT_FAILED') });
       return emptyDet;
+    }
+  },
+
+  checkRuntime: async () => {
+    set({ isDetecting: true, runtimeError: null });
+    try {
+      const diagnostics = await invoke<EnvironmentDiagnostics>('check_runtime');
+      set({ diagnostics, isDetecting: false });
+      return diagnostics;
+    } catch (error) {
+      console.warn('Runtime diagnostics failed:', error);
+      set({ isDetecting: false, runtimeError: formatAppError(error, 'RUNTIME_CHECK_FAILED') });
+      return null;
+    }
+  },
+
+  testRuntime: async (component) => {
+    set({ runtimeError: null });
+    try {
+      const result = await invoke<RuntimeComponent>('test_runtime', { component });
+      set((state) => ({
+        diagnostics: state.diagnostics
+          ? { ...state.diagnostics, [component]: result, checkedAt: Date.now() }
+          : state.diagnostics,
+      }));
+      return result;
+    } catch (error) {
+      console.warn(`Runtime test failed for ${component}:`, error);
+      set({ runtimeError: formatAppError(error, 'RUNTIME_TEST_FAILED') });
+      return null;
+    }
+  },
+
+  repairRuntime: async () => {
+    set({ isRepairing: true, runtimeError: null });
+    try {
+      const diagnostics = await invoke<EnvironmentDiagnostics>('repair_runtime');
+      set({ diagnostics, isRepairing: false });
+      await get().detectExecutables();
+      return diagnostics;
+    } catch (error) {
+      console.warn('Runtime repair failed:', error);
+      set({
+        isRepairing: false,
+        runtimeError: formatAppError(error, 'RUNTIME_REPAIR_FAILED'),
+      });
+      return null;
     }
   },
 
   setCustomScrcpyPath: async (path: string) => {
     const normalizedPath = path.trim();
+    set({ runtimeError: null });
     try {
       await invoke('set_custom_scrcpy_path', { path: normalizedPath });
       get().updateSettings({ scrcpyPath: normalizedPath });
@@ -179,12 +239,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       return true;
     } catch (e) {
       console.error('Failed to set custom scrcpy path:', e);
+      set({ runtimeError: formatAppError(e, 'SCRCPY_NOT_FOUND') });
       return false;
     }
   },
 
   setCustomAdbPath: async (path: string) => {
     const normalizedPath = path.trim();
+    set({ runtimeError: null });
     try {
       await invoke('set_custom_adb_path', { path: normalizedPath });
       get().updateSettings({ adbPath: normalizedPath });
@@ -192,6 +254,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       return true;
     } catch (e) {
       console.error('Failed to set custom adb path:', e);
+      set({ runtimeError: formatAppError(e, 'ADB_NOT_FOUND') });
       return false;
     }
   },

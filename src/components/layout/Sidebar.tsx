@@ -6,6 +6,7 @@ import {
   Camera,
   Video,
   Wifi,
+  FolderOpen,
   Bookmark,
   Wrench,
   Terminal,
@@ -17,17 +18,17 @@ import {
 import { useUiStore, TabType } from '@/stores/useUiStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useScrcpyStore } from '@/stores/useScrcpyStore';
-import { useTranslation } from '@/lib/i18n';
+import { useTranslation, type TranslationKey } from '@/lib/i18n';
 
 interface NavItem {
   id: TabType;
-  labelKey: string;
+  labelKey: TranslationKey;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number | string;
 }
 
 export const Sidebar: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tf } = useTranslation();
   const { activeTab, setActiveTab, isSidebarCollapsed, setSidebarCollapsed } = useUiStore();
   const { devices } = useDeviceStore();
   const { sessions } = useScrcpyStore();
@@ -41,6 +42,7 @@ export const Sidebar: React.FC = () => {
     { id: 'camera', labelKey: 'camera', icon: Camera },
     { id: 'recording', labelKey: 'recording', icon: Video },
     { id: 'wireless', labelKey: 'wireless', icon: Wifi },
+    { id: 'files', labelKey: 'files', icon: FolderOpen },
     { id: 'profiles', labelKey: 'profiles', icon: Bookmark },
     { id: 'adbTools', labelKey: 'adbTools', icon: Wrench },
     { id: 'logs', labelKey: 'logs', icon: Terminal },
@@ -68,7 +70,7 @@ export const Sidebar: React.FC = () => {
                   ? 'bg-primary-light text-primary font-semibold shadow-sm ring-1 ring-primary/20'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
               }`}
-              title={isSidebarCollapsed ? t(item.labelKey as any) : undefined}
+              title={isSidebarCollapsed ? t(item.labelKey) : undefined}
             >
               <Icon
                 className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${
@@ -78,7 +80,7 @@ export const Sidebar: React.FC = () => {
 
               {!isSidebarCollapsed && (
                 <span className="truncate flex-1 text-left">
-                  {t(item.labelKey as any)}
+                  {t(item.labelKey)}
                 </span>
               )}
 
@@ -108,7 +110,7 @@ export const Sidebar: React.FC = () => {
             <div className="flex items-center gap-2">
               <Radio className="w-3.5 h-3.5 animate-pulse" />
               <span className="text-[11px] font-bold uppercase tracking-wider">
-                {activeSessionsCount} Active
+                {tf('activeSessions', { count: activeSessionsCount })}
               </span>
             </div>
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -118,13 +120,13 @@ export const Sidebar: React.FC = () => {
         <button
           onClick={() => setSidebarCollapsed(!isSidebarCollapsed)}
           className="w-full flex items-center justify-center p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors text-xs"
-          title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={isSidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}
         >
           {isSidebarCollapsed ? (
             <ChevronRight className="w-4 h-4" />
           ) : (
             <div className="w-full flex items-center justify-between px-1">
-              <span className="text-[11px] text-text-muted">Collapse</span>
+              <span className="text-[11px] text-text-muted">{t('collapseSidebar')}</span>
               <ChevronLeft className="w-4 h-4" />
             </div>
           )}

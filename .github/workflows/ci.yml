@@ -39,6 +39,9 @@ jobs:
       - name: Lint frontend
         run: npm run lint
 
+      - name: Check version synchronization
+        run: npm run check:versions
+
       - name: Test frontend
         run: npm test
 

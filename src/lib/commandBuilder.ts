@@ -1,5 +1,38 @@
 import { ScrcpyConfig } from '../types/scrcpy';
 import { ScrcpyProfile } from '../types/profile';
+import { appendCustomArguments } from './scrcpyConfig';
+
+const OTG_BLOCKED_CUSTOM_OPTIONS = new Set([
+  '--audio-bit-rate',
+  '--audio-buffer',
+  '--audio-codec',
+  '--audio-codec-options',
+  '--audio-encoder',
+  '--audio-output-buffer',
+  '--camera-ar',
+  '--camera-facing',
+  '--camera-fps',
+  '--camera-high-speed',
+  '--camera-id',
+  '--camera-size',
+  '--camera-torch',
+  '--camera-zoom',
+  '--max-fps',
+  '--max-size',
+  '--new-display',
+  '--no-audio',
+  '--no-playback',
+  '--no-video',
+  '--record',
+  '--record-format',
+  '--record-orientation',
+  '--video-bit-rate',
+  '--video-buffer',
+  '--video-codec',
+  '--video-codec-options',
+  '--video-encoder',
+  '--video-source',
+]);
 
 /**
  * Builds the exact array of command-line arguments for scrcpy 4.1.
@@ -28,7 +61,7 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
     if (config.gamepadMode) {
       args.push(`--gamepad=${config.gamepadMode}`);
     }
-    return args;
+    return appendCustomArguments(args, config.customArgs, OTG_BLOCKED_CUSTOM_OPTIONS);
   }
 
   // 3. Camera Mode
@@ -107,11 +140,17 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
     if (config.videoEncoder && config.videoEncoder.trim() !== '') {
       args.push(`--video-encoder=${config.videoEncoder.trim()}`);
     }
+    if (config.videoCodecOptions && config.videoCodecOptions.trim() !== '') {
+      args.push(`--video-codec-options=${config.videoCodecOptions.trim()}`);
+    }
     if (config.videoBuffer && config.videoBuffer > 0) {
       args.push(`--video-buffer=${config.videoBuffer}`);
     }
     if (config.ignoreVideoEncoderConstraints) {
       args.push('--ignore-video-encoder-constraints');
+    }
+    if (config.noDownsizeOnError) {
+      args.push('--no-downsize-on-error');
     }
     if (config.minSizeAlignment && config.minSizeAlignment > 1) {
       args.push(`--min-size-alignment=${config.minSizeAlignment}`);
@@ -146,11 +185,17 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
     if (config.audioBuffer && config.audioBuffer > 0 && config.audioBuffer !== 50) {
       args.push(`--audio-buffer=${config.audioBuffer}`);
     }
+    if (config.audioOutputBuffer !== undefined && config.audioOutputBuffer >= 0 && config.audioOutputBuffer !== 10) {
+      args.push(`--audio-output-buffer=${config.audioOutputBuffer}`);
+    }
     if (config.audioDup) {
       args.push('--audio-dup');
     }
     if (config.audioEncoder && config.audioEncoder.trim() !== '') {
       args.push(`--audio-encoder=${config.audioEncoder.trim()}`);
+    }
+    if (config.audioCodecOptions && config.audioCodecOptions.trim() !== '') {
+      args.push(`--audio-codec-options=${config.audioCodecOptions.trim()}`);
     }
     if (config.requireAudio) {
       args.push('--require-audio');
@@ -202,6 +247,24 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
     if (config.rawKeyEvents) {
       args.push('--raw-key-events');
     }
+    if (config.screenOffTimeout !== undefined && config.screenOffTimeout >= 0) {
+      args.push(`--screen-off-timeout=${config.screenOffTimeout}`);
+    }
+    if (config.displayImePolicy) {
+      args.push(`--display-ime-policy=${config.displayImePolicy}`);
+    }
+    if (config.keepActive) {
+      args.push('--keep-active');
+    }
+    if (config.mouseBind?.trim()) {
+      args.push(`--mouse-bind=${config.mouseBind.trim()}`);
+    }
+    if (config.noMouseHover) {
+      args.push('--no-mouse-hover');
+    }
+    if (config.shortcutMod?.trim()) {
+      args.push(`--shortcut-mod=${config.shortcutMod.trim()}`);
+    }
   }
 
   // 8. Window Options
@@ -235,6 +298,18 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
   if (config.renderFit && config.renderFit !== 'letterbox') {
     args.push(`--render-fit=${config.renderFit}`);
   }
+  if (config.backgroundColor?.trim()) {
+    args.push(`--background-color=${config.backgroundColor.trim()}`);
+  }
+  if (config.noWindow) {
+    args.push('--no-window');
+  }
+  if (config.noWindowAspectRatioLock) {
+    args.push('--no-window-aspect-ratio-lock');
+  }
+  if (config.noMipmaps) {
+    args.push('--no-mipmaps');
+  }
   if (config.disableScreensaver) {
     args.push('--disable-screensaver');
   }
@@ -251,9 +326,12 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
     if (config.recordOrientation && config.recordOrientation.trim() !== '') {
       args.push(`--record-orientation=${config.recordOrientation.trim()}`);
     }
-    if (config.noPlayback) {
-      args.push('--no-playback');
-    }
+  }
+  if (config.noPlayback) {
+    args.push('--no-playback');
+  } else {
+    if (config.noVideoPlayback) args.push('--no-video-playback');
+    if (config.noAudioPlayback) args.push('--no-audio-playback');
   }
 
   // 10. Display ID & Time limit
@@ -263,24 +341,24 @@ export function buildScrcpyArgs(config: ScrcpyConfig): string[] {
   if (config.timeLimit && config.timeLimit > 0) {
     args.push(`--time-limit=${config.timeLimit}`);
   }
+  if (config.tunnelHost?.trim()) {
+    args.push(`--tunnel-host=${config.tunnelHost.trim()}`);
+  }
+  if (config.tunnelPort && config.tunnelPort > 0) {
+    args.push(`--tunnel-port=${config.tunnelPort}`);
+  }
   if (config.forceAdbForward) {
     args.push('--force-adb-forward');
   }
   if (config.killAdbOnClose) {
     args.push('--kill-adb-on-close');
   }
-
-  // 11. Custom raw args
-  if (config.customArgs && Array.isArray(config.customArgs)) {
-    for (const raw of config.customArgs) {
-      const trimmed = raw.trim();
-      if (trimmed && !args.includes(trimmed)) {
-        args.push(trimmed);
-      }
-    }
+  if (config.noCleanup) {
+    args.push('--no-cleanup');
   }
 
-  return args;
+  // 11. Custom argv items (typed options always win conflicts)
+  return appendCustomArguments(args, config.customArgs);
 }
 
 export function formatCommandString(executable: string, args: string[]): string {

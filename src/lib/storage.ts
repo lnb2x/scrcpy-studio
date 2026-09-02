@@ -1,4 +1,4 @@
-type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 function getDefaultStorage(): StorageLike | null {
   try {

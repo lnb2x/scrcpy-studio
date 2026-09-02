@@ -8,8 +8,181 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 
+const AUDIO_SOURCES: &[&str] = &[
+    "output",
+    "playback",
+    "mic",
+    "mic-unprocessed",
+    "mic-camcorder",
+    "mic-voice-recognition",
+    "mic-voice-communication",
+    "voice-call",
+    "voice-call-uplink",
+    "voice-call-downlink",
+    "voice-performance",
+];
+
+const OTG_BLOCKED_CUSTOM_OPTIONS: &[&str] = &[
+    "--audio-bit-rate",
+    "--audio-buffer",
+    "--audio-codec",
+    "--audio-codec-options",
+    "--audio-encoder",
+    "--audio-output-buffer",
+    "--camera-ar",
+    "--camera-facing",
+    "--camera-fps",
+    "--camera-high-speed",
+    "--camera-id",
+    "--camera-size",
+    "--camera-torch",
+    "--camera-zoom",
+    "--max-fps",
+    "--max-size",
+    "--new-display",
+    "--no-audio",
+    "--no-playback",
+    "--no-video",
+    "--record",
+    "--record-format",
+    "--record-orientation",
+    "--video-bit-rate",
+    "--video-buffer",
+    "--video-codec",
+    "--video-codec-options",
+    "--video-encoder",
+    "--video-source",
+];
+
 fn trimmed_non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn option_key(argument: &str) -> &str {
+    argument.split_once('=').map_or(argument, |(key, _)| key)
+}
+
+fn validate_custom_argument(argument: &str) -> AppResult<()> {
+    let argument = argument.trim();
+    if argument.is_empty() {
+        return Err(AppError::InvalidConfig(
+            "Custom arguments cannot be empty".to_string(),
+        ));
+    }
+    if argument
+        .chars()
+        .any(|character| matches!(character, '\0' | '\r' | '\n'))
+    {
+        return Err(AppError::InvalidConfig(
+            "Custom arguments cannot contain null bytes or line breaks".to_string(),
+        ));
+    }
+
+    let key = option_key(argument);
+    let name = key.strip_prefix("--").ok_or_else(|| {
+        AppError::InvalidConfig(format!(
+            "Custom argument must be one long argv item: {argument}"
+        ))
+    })?;
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(AppError::InvalidConfig(format!(
+            "Invalid custom argument name: {key}"
+        )));
+    }
+
+    Ok(())
+}
+
+fn append_custom_arguments(
+    args: &mut Vec<String>,
+    custom_args: Option<&[String]>,
+    blocked_keys: &[&str],
+) {
+    let Some(custom_args) = custom_args else {
+        return;
+    };
+
+    let mut seen = args
+        .iter()
+        .filter(|argument| argument.starts_with("--"))
+        .map(|argument| option_key(argument).to_string())
+        .collect::<std::collections::HashSet<_>>();
+
+    for raw in custom_args {
+        let argument = raw.trim();
+        let key = option_key(argument);
+        if !seen.contains(key) && !blocked_keys.contains(&key) {
+            seen.insert(key.to_string());
+            args.push(argument.to_string());
+        }
+    }
+}
+
+fn validate_config(config: &ScrcpyConfig) -> AppResult<()> {
+    if let Some(port) = config.tunnel_port {
+        if port == 0 {
+            return Err(AppError::InvalidConfig(
+                "Tunnel port must be between 1 and 65535".to_string(),
+            ));
+        }
+    }
+
+    if let Some(source) = trimmed_non_empty(config.audio_source.as_deref()) {
+        if !AUDIO_SOURCES.contains(&source) {
+            return Err(AppError::InvalidConfig(format!(
+                "Unsupported audio source: {source}"
+            )));
+        }
+    }
+
+    if let Some(policy) = trimmed_non_empty(config.display_ime_policy.as_deref()) {
+        if !["local", "fallback", "hide"].contains(&policy) {
+            return Err(AppError::InvalidConfig(format!(
+                "Unsupported display IME policy: {policy}"
+            )));
+        }
+    }
+
+    if let Some(color) = trimmed_non_empty(config.background_color.as_deref()) {
+        let digits = color.strip_prefix('#').unwrap_or_default();
+        if !matches!(digits.len(), 3 | 6) || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(AppError::InvalidConfig(
+                "Background color must use #RGB or #RRGGBB".to_string(),
+            ));
+        }
+    }
+
+    if let Some(bindings) = trimmed_non_empty(config.mouse_bind.as_deref()) {
+        let valid_group = |group: &str| {
+            group.len() == 4
+                && group
+                    .bytes()
+                    .all(|byte| matches!(byte, b'+' | b'-' | b'b' | b'h' | b's' | b'n'))
+        };
+        let groups = bindings.split(':').collect::<Vec<_>>();
+        if groups.is_empty() || groups.len() > 2 || !groups.into_iter().all(valid_group) {
+            return Err(AppError::InvalidConfig(
+                "Mouse binding must contain one or two groups of four bindings".to_string(),
+            ));
+        }
+    }
+
+    let mut custom_keys = std::collections::HashSet::new();
+    for argument in config.custom_args.as_deref().unwrap_or_default() {
+        validate_custom_argument(argument)?;
+        let key = option_key(argument.trim());
+        if !custom_keys.insert(key.to_string()) {
+            return Err(AppError::InvalidConfig(format!(
+                "Duplicate custom option: {key}"
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn ensure_command_success(action: &str, output: &Output) -> AppResult<()> {
@@ -53,12 +226,18 @@ impl ScrcpyService {
     }
 
     pub fn set_custom_path(&self, path: Option<PathBuf>) {
-        let mut p = self.custom_scrcpy_path.lock().unwrap();
+        let mut p = self
+            .custom_scrcpy_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *p = path;
     }
 
     pub fn get_scrcpy_path(&self) -> AppResult<PathBuf> {
-        let custom = self.custom_scrcpy_path.lock().unwrap();
+        let custom = self
+            .custom_scrcpy_path
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(ref p) = *custom {
             if p.exists() {
                 return Ok(p.clone());
@@ -97,6 +276,11 @@ impl ScrcpyService {
             if let Some(gm) = trimmed_non_empty(config.gamepad_mode.as_deref()) {
                 args.push(format!("--gamepad={}", gm));
             }
+            append_custom_arguments(
+                &mut args,
+                config.custom_args.as_deref(),
+                OTG_BLOCKED_CUSTOM_OPTIONS,
+            );
             return args;
         }
 
@@ -193,6 +377,9 @@ impl ScrcpyService {
             if let Some(encoder) = trimmed_non_empty(config.video_encoder.as_deref()) {
                 args.push(format!("--video-encoder={}", encoder));
             }
+            if let Some(options) = trimmed_non_empty(config.video_codec_options.as_deref()) {
+                args.push(format!("--video-codec-options={}", options));
+            }
             if let Some(buffer) = config.video_buffer {
                 if buffer > 0 {
                     args.push(format!("--video-buffer={}", buffer));
@@ -200,6 +387,9 @@ impl ScrcpyService {
             }
             if config.ignore_video_encoder_constraints.unwrap_or(false) {
                 args.push("--ignore-video-encoder-constraints".to_string());
+            }
+            if config.no_downsize_on_error.unwrap_or(false) {
+                args.push("--no-downsize-on-error".to_string());
             }
             if let Some(align) = config.min_size_alignment {
                 if align > 1 {
@@ -250,11 +440,19 @@ impl ScrcpyService {
                     args.push(format!("--audio-buffer={}", buffer));
                 }
             }
+            if let Some(buffer) = config.audio_output_buffer {
+                if buffer != 10 {
+                    args.push(format!("--audio-output-buffer={}", buffer));
+                }
+            }
             if config.audio_dup.unwrap_or(false) {
                 args.push("--audio-dup".to_string());
             }
             if let Some(encoder) = trimmed_non_empty(config.audio_encoder.as_deref()) {
                 args.push(format!("--audio-encoder={}", encoder));
+            }
+            if let Some(options) = trimmed_non_empty(config.audio_codec_options.as_deref()) {
+                args.push(format!("--audio-codec-options={}", options));
             }
             if config.require_audio.unwrap_or(false) {
                 args.push("--require-audio".to_string());
@@ -312,6 +510,24 @@ impl ScrcpyService {
             if config.raw_key_events.unwrap_or(false) {
                 args.push("--raw-key-events".to_string());
             }
+            if let Some(timeout) = config.screen_off_timeout {
+                args.push(format!("--screen-off-timeout={}", timeout));
+            }
+            if let Some(policy) = trimmed_non_empty(config.display_ime_policy.as_deref()) {
+                args.push(format!("--display-ime-policy={}", policy));
+            }
+            if config.keep_active.unwrap_or(false) {
+                args.push("--keep-active".to_string());
+            }
+            if let Some(bindings) = trimmed_non_empty(config.mouse_bind.as_deref()) {
+                args.push(format!("--mouse-bind={}", bindings));
+            }
+            if config.no_mouse_hover.unwrap_or(false) {
+                args.push("--no-mouse-hover".to_string());
+            }
+            if let Some(shortcut_mod) = trimmed_non_empty(config.shortcut_mod.as_deref()) {
+                args.push(format!("--shortcut-mod={}", shortcut_mod));
+            }
         }
 
         // 8. Window Options
@@ -357,6 +573,18 @@ impl ScrcpyService {
                 args.push(format!("--render-fit={}", fit));
             }
         }
+        if let Some(color) = trimmed_non_empty(config.background_color.as_deref()) {
+            args.push(format!("--background-color={}", color));
+        }
+        if config.no_window.unwrap_or(false) {
+            args.push("--no-window".to_string());
+        }
+        if config.no_window_aspect_ratio_lock.unwrap_or(false) {
+            args.push("--no-window-aspect-ratio-lock".to_string());
+        }
+        if config.no_mipmaps.unwrap_or(false) {
+            args.push("--no-mipmaps".to_string());
+        }
         if config.disable_screensaver.unwrap_or(false) {
             args.push("--disable-screensaver".to_string());
         }
@@ -373,8 +601,15 @@ impl ScrcpyService {
             if let Some(orientation) = trimmed_non_empty(config.record_orientation.as_deref()) {
                 args.push(format!("--record-orientation={}", orientation));
             }
-            if config.no_playback.unwrap_or(false) {
-                args.push("--no-playback".to_string());
+        }
+        if config.no_playback.unwrap_or(false) {
+            args.push("--no-playback".to_string());
+        } else {
+            if config.no_video_playback.unwrap_or(false) {
+                args.push("--no-video-playback".to_string());
+            }
+            if config.no_audio_playback.unwrap_or(false) {
+                args.push("--no-audio-playback".to_string());
             }
         }
 
@@ -389,24 +624,33 @@ impl ScrcpyService {
                 args.push(format!("--time-limit={}", limit));
             }
         }
+        if let Some(host) = trimmed_non_empty(config.tunnel_host.as_deref()) {
+            args.push(format!("--tunnel-host={}", host));
+        }
+        if let Some(port) = config.tunnel_port {
+            if port > 0 {
+                args.push(format!("--tunnel-port={}", port));
+            }
+        }
         if config.force_adb_forward.unwrap_or(false) {
             args.push("--force-adb-forward".to_string());
         }
         if config.kill_adb_on_close.unwrap_or(false) {
             args.push("--kill-adb-on-close".to_string());
         }
-
-        // 11. Custom raw args
-        if let Some(ref customs) = config.custom_args {
-            for arg in customs {
-                let trimmed = arg.trim();
-                if !trimmed.is_empty() && !args.iter().any(|arg| arg == trimmed) {
-                    args.push(trimmed.to_string());
-                }
-            }
+        if config.no_cleanup.unwrap_or(false) {
+            args.push("--no-cleanup".to_string());
         }
 
+        // 11. Custom argv items. Typed settings always win conflicts.
+        append_custom_arguments(&mut args, config.custom_args.as_deref(), &[]);
+
         args
+    }
+
+    pub fn validated_args(&self, config: &ScrcpyConfig) -> AppResult<Vec<String>> {
+        validate_config(config)?;
+        Ok(self.build_args(config))
     }
 
     pub async fn start(
@@ -416,7 +660,7 @@ impl ScrcpyService {
         mode: Option<String>,
     ) -> AppResult<ScrcpySession> {
         let scrcpy_path = self.get_scrcpy_path()?;
-        let args = self.build_args(&config);
+        let args = self.validated_args(&config)?;
         let serial = config.serial.unwrap_or_else(|| "default".to_string());
         let mode_str = mode.unwrap_or_else(|| "mirror".to_string());
 
@@ -497,6 +741,14 @@ impl ScrcpyService {
 mod tests {
     use super::*;
     use crate::models::CameraConfig;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct CommandFixture {
+        name: String,
+        config: ScrcpyConfig,
+        expected: Vec<String>,
+    }
 
     fn service() -> ScrcpyService {
         ScrcpyService::new(ProcessManager::new())
@@ -504,6 +756,40 @@ mod tests {
 
     fn has_arg(args: &[String], expected: &str) -> bool {
         args.iter().any(|arg| arg == expected)
+    }
+
+    #[test]
+    fn matches_shared_typescript_rust_command_fixtures() {
+        let fixtures: Vec<CommandFixture> =
+            serde_json::from_str(include_str!("../../../tests/scrcpy-command-fixtures.json"))
+                .expect("shared command fixtures must be valid JSON");
+
+        for fixture in fixtures {
+            let actual = service().build_args(&fixture.config);
+            assert_eq!(actual, fixture.expected, "fixture failed: {}", fixture.name);
+        }
+    }
+
+    #[test]
+    fn tunnel_options_are_forwarded_and_validated() {
+        let valid = ScrcpyConfig {
+            tunnel_host: Some(" 127.0.0.1 ".to_string()),
+            tunnel_port: Some(27183),
+            ..ScrcpyConfig::default()
+        };
+        assert_eq!(
+            service().validated_args(&valid).expect("valid tunnel"),
+            ["--tunnel-host=127.0.0.1", "--tunnel-port=27183"]
+        );
+
+        let invalid = ScrcpyConfig {
+            tunnel_port: Some(0),
+            ..ScrcpyConfig::default()
+        };
+        assert!(matches!(
+            service().validated_args(&invalid),
+            Err(AppError::InvalidConfig(_))
+        ));
     }
 
     #[test]

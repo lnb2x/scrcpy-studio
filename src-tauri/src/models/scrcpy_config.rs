@@ -38,8 +38,10 @@ pub struct ScrcpyConfig {
     pub max_fps: Option<u32>,
     pub video_bitrate: Option<String>, // "8M", "16M", etc.
     pub video_encoder: Option<String>,
+    pub video_codec_options: Option<String>,
     pub video_buffer: Option<u32>,
     pub ignore_video_encoder_constraints: Option<bool>,
+    pub no_downsize_on_error: Option<bool>,
     pub min_size_alignment: Option<u32>,
     pub crop: Option<String>,
     pub display_orientation: Option<String>,
@@ -52,8 +54,10 @@ pub struct ScrcpyConfig {
     pub audio_codec: Option<String>,  // "opus", "aac", "flac", "raw"
     pub audio_bitrate: Option<String>,
     pub audio_buffer: Option<u32>,
+    pub audio_output_buffer: Option<u32>,
     pub audio_dup: Option<bool>,
     pub audio_encoder: Option<String>,
+    pub audio_codec_options: Option<String>,
     pub require_audio: Option<bool>,
 
     // Control options
@@ -71,6 +75,12 @@ pub struct ScrcpyConfig {
     pub no_key_repeat: Option<bool>,
     pub prefer_text: Option<bool>,
     pub raw_key_events: Option<bool>,
+    pub screen_off_timeout: Option<u32>,
+    pub display_ime_policy: Option<String>,
+    pub keep_active: Option<bool>,
+    pub mouse_bind: Option<String>,
+    pub no_mouse_hover: Option<bool>,
+    pub shortcut_mod: Option<String>,
 
     // Window options
     pub fullscreen: Option<bool>,
@@ -83,6 +93,10 @@ pub struct ScrcpyConfig {
     pub window_y: Option<String>,
     pub render_driver: Option<String>,
     pub render_fit: Option<String>, // "letterbox", "stretched", "unscaled"
+    pub background_color: Option<String>,
+    pub no_window: Option<bool>,
+    pub no_window_aspect_ratio_lock: Option<bool>,
+    pub no_mipmaps: Option<bool>,
     pub disable_screensaver: Option<bool>,
     pub print_fps: Option<bool>,
 
@@ -91,6 +105,8 @@ pub struct ScrcpyConfig {
     pub record_format: Option<String>, // "mp4", "mkv", "aac", "opus"
     pub record_orientation: Option<String>,
     pub no_playback: Option<bool>,
+    pub no_video_playback: Option<bool>,
+    pub no_audio_playback: Option<bool>,
 
     // Modes & special configurations
     pub otg_mode: Option<bool>,
@@ -100,6 +116,7 @@ pub struct ScrcpyConfig {
     pub tunnel_port: Option<u16>,
     pub force_adb_forward: Option<bool>,
     pub kill_adb_on_close: Option<bool>,
+    pub no_cleanup: Option<bool>,
 
     // Sub-configs
     pub camera: Option<CameraConfig>,

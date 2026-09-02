@@ -1,0 +1,135 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Windows installers
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      HAS_UPDATER_SIGNING: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && secrets.TAURI_UPDATER_PUBLIC_KEY != '' }}
+      HAS_WINDOWS_SIGNING: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && secrets.WINDOWS_TIMESTAMP_URL != '' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check version and tag synchronization
+        run: npm run check:versions
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Lint Rust backend
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: Import Windows code-signing certificate
+        if: env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'scrcpy-studio-signing.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item -LiteralPath $certificatePath -Force
+          $signingConfig = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $certificate.Thumbprint
+                digestAlgorithm = 'sha256'
+                timestampUrl = $env:WINDOWS_TIMESTAMP_URL
+              }
+            }
+          }
+          $signingConfig | ConvertTo-Json -Depth 4 | Set-Content src-tauri/tauri.ci-signing.conf.json
+          "WINDOWS_SIGNING_ARG=--config src-tauri/tauri.ci-signing.conf.json" | Out-File $env:GITHUB_ENV -Append
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Build signed updater artifacts and publish release
+        if: env.HAS_UPDATER_SIGNING == 'true'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Scrcpy Studio ${{ github.ref_name }}'
+          releaseBody: 'Windows x64 installers for Scrcpy Studio. See CHANGELOG.md for release notes.'
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          uploadWorkflowArtifacts: true
+          releaseAssetNamePattern: 'Scrcpy-Studio_[version]_[arch][setup][ext]'
+          args: '--bundles nsis,msi --config src-tauri/tauri.updater.conf.json ${{ env.WINDOWS_SIGNING_ARG }}'
+
+      - name: Build unsigned installers and publish release
+        if: env.HAS_UPDATER_SIGNING != 'true'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Scrcpy Studio ${{ github.ref_name }}'
+          releaseBody: 'Unsigned Windows x64 installers for Scrcpy Studio. See CHANGELOG.md for release notes.'
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          uploadWorkflowArtifacts: true
+          releaseAssetNamePattern: 'Scrcpy-Studio_[version]_[arch][setup][ext]'
+          args: '--bundles nsis,msi ${{ env.WINDOWS_SIGNING_ARG }}'
+
+      - name: Remove imported signing certificate
+        if: always() && env.WINDOWS_CERTIFICATE_THUMBPRINT != ''
+        shell: pwsh
+        run: Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:WINDOWS_CERTIFICATE_THUMBPRINT" -Force

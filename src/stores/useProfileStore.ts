@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { ScrcpyProfile } from '../types/profile';
 import { SMART_PRESETS } from '../lib/commandBuilder';
-import { readStoredArray, readStoredObject, writeStoredJson } from '../lib/storage';
+import { readStoredObject, writeStoredJson } from '../lib/storage';
+import { loadCustomProfiles, saveCustomProfiles } from '../lib/profileStorage';
 
 interface ProfileStore {
   profiles: ScrcpyProfile[];
@@ -16,15 +17,7 @@ interface ProfileStore {
 }
 
 export const useProfileStore = create<ProfileStore>((set, get) => {
-  const savedCustomProfiles = readStoredArray<ScrcpyProfile>('scrcpy-custom-profiles').filter(
-    (profile) =>
-      typeof profile === 'object' &&
-      profile !== null &&
-      typeof profile.id === 'string' &&
-      typeof profile.name === 'string' &&
-      typeof profile.config === 'object' &&
-      profile.config !== null
-  );
+  const savedCustomProfiles = loadCustomProfiles();
   const builtInFavorites = readStoredObject<Record<string, boolean>>(
     'scrcpy-built-in-favorites',
     {}
@@ -36,8 +29,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => {
   const allProfiles = [...builtIns, ...savedCustomProfiles];
 
   const saveCustom = (profiles: ScrcpyProfile[]) => {
-    const customOnly = profiles.filter((p) => !p.isBuiltIn);
-    writeStoredJson('scrcpy-custom-profiles', customOnly);
+    saveCustomProfiles(profiles);
   };
 
   const saveBuiltInFavorites = (profiles: ScrcpyProfile[]) => {

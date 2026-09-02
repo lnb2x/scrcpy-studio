@@ -7,6 +7,7 @@ export type NavigationTab =
   | 'camera'
   | 'recording'
   | 'wireless'
+  | 'files'
   | 'profiles'
   | 'adbTools'
   | 'logs'

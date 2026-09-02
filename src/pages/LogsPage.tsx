@@ -40,7 +40,7 @@ export const LogsPage: React.FC = () => {
       const text = filteredLogs
         .map(
           (l) =>
-            `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.level}] ${l.message}`
+            `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.source ?? 'APP'}] [${l.level}] ${l.message}`
         )
         .join('\n');
       await navigator.clipboard.writeText(text);
@@ -54,7 +54,7 @@ export const LogsPage: React.FC = () => {
   const handleExport = async () => {
     try {
       const targetPath = await save({
-        filters: [{ name: 'Log File', extensions: ['txt', 'log'] }],
+        filters: [{ name: t('logFile'), extensions: ['txt', 'log'] }],
         defaultPath: `scrcpy-studio-logs-${new Date().toISOString().slice(0, 10)}.log`,
       });
 
@@ -62,7 +62,7 @@ export const LogsPage: React.FC = () => {
         const text = filteredLogs
           .map(
             (l) =>
-              `[${new Date(l.timestamp).toISOString()}] [${l.level}] ${l.message}`
+              `[${new Date(l.timestamp).toISOString()}] [${l.source ?? 'APP'}] [${l.level}] ${l.message}`
           )
           .join('\n');
         await writeTextFile(targetPath, text);
@@ -78,9 +78,7 @@ export const LogsPage: React.FC = () => {
         return 'text-rose-400 bg-rose-500/15 border-rose-500/20';
       case 'WARN':
         return 'text-amber-400 bg-amber-500/15 border-amber-500/20';
-      case 'ADB':
-        return 'text-cyan-400 bg-cyan-500/15 border-cyan-500/20';
-      case 'SCRCPY':
+      case 'DEBUG':
         return 'text-primary bg-primary-light border-primary/20';
       default:
         return 'text-text-muted bg-surface-hover border-border';
@@ -96,20 +94,21 @@ export const LogsPage: React.FC = () => {
             {t('logsTitle')}
           </h1>
           <p className="text-xs text-text-secondary mt-1">
-            Real-time stdout, stderr, and ADB telemetry diagnostics.
+            {t('logsDescription')}
           </p>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
           <button
-            onClick={handleCopyAll}
+            type="button"
+            onClick={() => void handleCopyAll()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary hover:text-text-primary text-xs font-semibold border border-border transition-colors"
           >
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400">Copied!</span>
+                <span className="text-emerald-400">{t('copied')}</span>
               </>
             ) : (
               <>
@@ -120,7 +119,8 @@ export const LogsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={handleExport}
+            type="button"
+            onClick={() => void handleExport()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary hover:text-text-primary text-xs font-semibold border border-border transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
@@ -128,6 +128,7 @@ export const LogsPage: React.FC = () => {
           </button>
 
           <button
+            type="button"
             onClick={clearLogs}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active text-text-muted hover:text-rose-400 text-xs font-semibold border border-border transition-colors"
           >
@@ -140,8 +141,9 @@ export const LogsPage: React.FC = () => {
       {/* Filter & Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-card border border-border rounded-xl shrink-0">
         <div className="flex items-center gap-1.5 flex-wrap">
-          {['ALL', 'INFO', 'ADB', 'SCRCPY', 'WARN', 'ERROR'].map((lvl) => (
+          {['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'].map((lvl) => (
             <button
+              type="button"
               key={lvl}
               onClick={() => setFilterLevel(lvl)}
               className={`px-2.5 py-1 rounded-md text-xs font-mono font-semibold transition-colors ${
@@ -168,16 +170,17 @@ export const LogsPage: React.FC = () => {
           </div>
 
           <button
+            type="button"
             onClick={() => setAutoScroll(!autoScroll)}
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono border transition-colors ${
               autoScroll
                 ? 'bg-primary-light border-primary/40 text-primary'
                 : 'bg-surface text-text-muted border-border'
             }`}
-            title="Toggle Auto Scroll"
+            title={t('toggleAutoScroll')}
           >
             <ArrowDown className="w-3 h-3" />
-            <span>Scroll</span>
+            <span>{t('scroll')}</span>
           </button>
         </div>
       </div>
@@ -189,7 +192,7 @@ export const LogsPage: React.FC = () => {
       >
         {filteredLogs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-text-muted">
-            No matching log entries found.
+            {t('noMatchingLogs')}
           </div>
         ) : (
           filteredLogs.map((log, idx) => (
@@ -206,13 +209,17 @@ export const LogsPage: React.FC = () => {
                 {log.level}
               </span>
 
+              <span className="px-1.5 py-0.2 text-[10px] font-bold rounded border border-border bg-surface-hover text-cyan-300 shrink-0 uppercase select-none">
+                {log.source ?? 'APP'}
+              </span>
+
               <span
                 className={`break-all leading-relaxed ${
                   log.level === 'ERROR'
                     ? 'text-rose-400 font-semibold'
                     : log.level === 'WARN'
                     ? 'text-amber-300'
-                    : log.level === 'ADB'
+                    : log.level === 'DEBUG'
                     ? 'text-cyan-300'
                     : 'text-text-secondary'
                 }`}

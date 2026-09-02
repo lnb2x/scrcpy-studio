@@ -21,6 +21,7 @@ import { useScrcpyStore } from '@/stores/useScrcpyStore';
 import { useTranslation } from '@/lib/i18n';
 import { ScrcpyProfile } from '@/types/profile';
 import { VideoCodec } from '@/types/scrcpy';
+import { useDeviceStore } from '@/stores/useDeviceStore';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Sparkles,
@@ -39,6 +40,7 @@ export const ProfilesPage: React.FC = () => {
   const { profiles, addProfile, deleteProfile, duplicateProfile, toggleFavorite } =
     useProfileStore();
   const { applyPreset, startSession, config } = useScrcpyStore();
+  const { selectedDevice } = useDeviceStore();
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
@@ -47,17 +49,21 @@ export const ProfilesPage: React.FC = () => {
   const [newMaxSize, setNewMaxSize] = useState(1600);
   const [newFps, setNewFps] = useState(60);
   const [newBitrate, setNewBitrate] = useState('8M');
+  const [associateSelectedDevice, setAssociateSelectedDevice] = useState(false);
 
   const handleLaunch = (profile: ScrcpyProfile) => {
     applyPreset(profile);
-    startSession(profile.config);
+    void startSession({
+      ...profile.config,
+      serial: profile.deviceSerial ?? profile.config.serial,
+    });
   };
 
   const handleCreate = () => {
     if (!newProfileName.trim()) return;
     addProfile({
       name: newProfileName.trim(),
-      description: newProfileDesc.trim() || 'Custom profile',
+      description: newProfileDesc.trim() || t('customProfile'),
       iconName: 'Bookmark',
       config: {
         ...config,
@@ -66,10 +72,14 @@ export const ProfilesPage: React.FC = () => {
         maxFps: newFps,
         videoBitrate: newBitrate,
       },
+      deviceSerial: associateSelectedDevice ? selectedDevice?.serial : undefined,
+      deviceModel: associateSelectedDevice ? selectedDevice?.model : undefined,
+      autoLaunch: false,
     });
 
     setNewProfileName('');
     setNewProfileDesc('');
+    setAssociateSelectedDevice(false);
     setIsCreateModalOpen(false);
   };
 
@@ -118,7 +128,7 @@ export const ProfilesPage: React.FC = () => {
                           ? 'text-amber-400'
                           : 'text-text-muted hover:text-text-primary'
                       }`}
-                      title="Favorite"
+                      title={t('favorite')}
                     >
                       <Star className={`w-4 h-4 ${prof.isFavorite ? 'fill-current' : ''}`} />
                     </button>
@@ -152,7 +162,7 @@ export const ProfilesPage: React.FC = () => {
               {/* Specs Pills */}
               <div className="flex flex-wrap gap-1.5 text-[10px] font-mono text-text-muted">
                 <span className="px-2 py-0.5 rounded bg-surface border border-border">
-                  {prof.config.maxSize ? `${prof.config.maxSize}p` : 'Native'}
+                  {prof.config.maxSize ? `${prof.config.maxSize}p` : t('nativeResolution')}
                 </span>
                 <span className="px-2 py-0.5 rounded bg-surface border border-border">
                   {prof.config.maxFps || 60} FPS
@@ -163,6 +173,11 @@ export const ProfilesPage: React.FC = () => {
                 <span className="px-2 py-0.5 rounded bg-surface border border-border">
                   {prof.config.videoBitrate || '8M'}
                 </span>
+                {(prof.deviceModel || prof.deviceSerial) && (
+                  <span className="px-2 py-0.5 rounded bg-primary-light border border-primary/30 text-primary">
+                    {prof.deviceModel || prof.deviceSerial}
+                  </span>
+                )}
               </div>
 
               {/* Launch Button */}
@@ -181,11 +196,13 @@ export const ProfilesPage: React.FC = () => {
       {/* Create Profile Modal */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-md bg-surface border border-border-highlight rounded-2xl p-6 shadow-2xl space-y-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="create-profile-title" className="w-full max-w-md bg-surface border border-border-highlight rounded-2xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-text-primary">{t('createProfile')}</h3>
+              <h3 id="create-profile-title" className="text-base font-bold text-text-primary">{t('createProfile')}</h3>
               <button
+                type="button"
                 onClick={() => setIsCreateModalOpen(false)}
+                aria-label={t('close')}
                 className="p-1 rounded-lg hover:bg-surface-hover text-text-muted"
               >
                 <X className="w-4 h-4" />
@@ -201,7 +218,7 @@ export const ProfilesPage: React.FC = () => {
                   type="text"
                   value={newProfileName}
                   onChange={(e) => setNewProfileName(e.target.value)}
-                  placeholder="e.g. 4K Cinema Mirror"
+                  placeholder={t('profileNamePlaceholder')}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                 />
               </div>
@@ -214,7 +231,7 @@ export const ProfilesPage: React.FC = () => {
                   type="text"
                   value={newProfileDesc}
                   onChange={(e) => setNewProfileDesc(e.target.value)}
-                  placeholder="e.g. Ultra high bitrate for presentation"
+                  placeholder={t('profileDescriptionPlaceholder')}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
                 />
               </div>
@@ -229,7 +246,7 @@ export const ProfilesPage: React.FC = () => {
                     onChange={(e) => setNewMaxSize(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs text-text-primary font-mono focus:outline-none focus:border-primary"
                   >
-                    <option value={0}>Native</option>
+                    <option value={0}>{t('nativeResolution')}</option>
                     <option value={2560}>2560p</option>
                     <option value={1920}>1920p</option>
                     <option value={1600}>1600p</option>
@@ -256,7 +273,7 @@ export const ProfilesPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-text-secondary">Video codec</label>
+                  <label className="text-xs font-semibold text-text-secondary">{t('videoCodec')}</label>
                   <select
                     value={newCodec}
                     onChange={(e) => setNewCodec(e.target.value as VideoCodec)}
@@ -271,7 +288,7 @@ export const ProfilesPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-text-secondary">Video bitrate</label>
+                  <label className="text-xs font-semibold text-text-secondary">{t('videoBitrate')}</label>
                   <select
                     value={newBitrate}
                     onChange={(e) => setNewBitrate(e.target.value)}
@@ -285,6 +302,21 @@ export const ProfilesPage: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {selectedDevice && (
+                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-background border border-border text-xs text-text-secondary cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={associateSelectedDevice}
+                    onChange={(event) => setAssociateSelectedDevice(event.target.checked)}
+                    className="mt-0.5 rounded text-primary focus:ring-0"
+                  />
+                  <span>
+                    <strong className="text-text-primary block">{t('associateSelectedDevice')}</strong>
+                    {selectedDevice.model || selectedDevice.serial} · {selectedDevice.serial}
+                  </span>
+                </label>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
@@ -292,14 +324,14 @@ export const ProfilesPage: React.FC = () => {
                 onClick={() => setIsCreateModalOpen(false)}
                 className="px-4 py-2 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary text-xs font-medium"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 onClick={handleCreate}
                 disabled={!newProfileName.trim()}
                 className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-sm disabled:opacity-50"
               >
-                Save Profile
+                {t('saveProfile')}
               </button>
             </div>
           </div>

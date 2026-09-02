@@ -9,4 +9,7 @@ export interface ScrcpyProfile {
   iconName: string;
   config: ScrcpyConfig;
   createdAt: number;
+  deviceSerial?: string;
+  deviceModel?: string;
+  autoLaunch?: boolean;
 }

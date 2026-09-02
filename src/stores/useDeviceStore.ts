@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { AndroidDevice, BatteryInfo, DeviceInfo } from '../types/device';
+import { formatAppError } from '@/lib/errors';
 
 interface DeviceStore {
   devices: AndroidDevice[];
@@ -70,10 +71,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       } catch (err: unknown) {
         set({
           isLoading: false,
-          error:
-            typeof err === 'object' && err !== null && 'message' in err
-              ? (err as { message: string }).message
-              : String(err),
+          error: formatAppError(err),
         });
       }
     })();
@@ -103,7 +101,28 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     try {
       const info = await invoke<DeviceInfo>('get_device_info', { serial });
       if (get().selectedSerial === serial) {
-        set({ deviceInfo: info, batteryInfo: info.battery });
+        set((state) => {
+          const devices = state.devices.map((device) =>
+            device.serial === serial
+              ? {
+                  ...device,
+                  model: info.model || device.model,
+                  manufacturer: info.manufacturer || device.manufacturer,
+                  brand: info.brand || device.brand,
+                  device: info.codename || device.device,
+                  androidVersion: info.androidVersion || device.androidVersion,
+                  apiLevel: info.apiLevel || device.apiLevel,
+                  screenResolution: info.screenResolution || device.screenResolution,
+                }
+              : device
+          );
+          return {
+            devices,
+            selectedDevice: devices.find((device) => device.serial === serial) ?? null,
+            deviceInfo: info,
+            batteryInfo: info.battery,
+          };
+        });
       }
     } catch (e) {
       console.warn('Failed to fetch detailed device info:', e);

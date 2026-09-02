@@ -20,6 +20,7 @@ export const QuickActionCard: React.FC<QuickActionCardProps> = ({
 }) => {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className={`p-4 rounded-xl bg-card hover:bg-card-hover border border-border hover:border-border-highlight flex flex-col items-start justify-between text-left transition-all duration-150 group shadow-sm relative overflow-hidden transform active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed`}

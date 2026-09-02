@@ -4,8 +4,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Minus, Square, Copy, X, Smartphone, Command } from 'lucide-react';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useUiStore } from '@/stores/useUiStore';
+import { useTranslation } from '@/lib/i18n';
 
 export const TitleBar: React.FC = () => {
+  const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
   const { selectedSerial, devices } = useDeviceStore();
   const { setCommandPaletteOpen } = useUiStore();
@@ -112,7 +114,7 @@ export const TitleBar: React.FC = () => {
           type="button"
           onClick={handleMinimize}
           className="w-9 h-7 flex items-center justify-center rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-          title="Minimize"
+          title={t('minimize')}
         >
           <Minus className="w-3.5 h-3.5" />
         </button>
@@ -120,7 +122,7 @@ export const TitleBar: React.FC = () => {
           type="button"
           onClick={handleMaximize}
           className="w-9 h-7 flex items-center justify-center rounded hover:bg-surface-hover text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-          title={isMaximized ? 'Restore' : 'Maximize'}
+          title={isMaximized ? t('restore') : t('maximize')}
         >
           {isMaximized ? (
             <Copy className="w-3 h-3 rotate-180" />
@@ -132,7 +134,7 @@ export const TitleBar: React.FC = () => {
           type="button"
           onClick={handleClose}
           className="w-9 h-7 flex items-center justify-center rounded hover:bg-rose-500 hover:text-white text-text-secondary transition-colors cursor-pointer"
-          title="Close"
+          title={t('close')}
         >
           <X className="w-3.5 h-3.5" />
         </button>

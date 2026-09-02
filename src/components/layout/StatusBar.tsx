@@ -15,7 +15,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useTranslation } from '@/lib/i18n';
 
 export const StatusBar: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tf } = useTranslation();
   const { devices, selectedSerial, batteryInfo, isLoading, fetchDevices } = useDeviceStore();
   const { sessions, lastError } = useScrcpyStore();
   const { detection } = useSettingsStore();
@@ -68,7 +68,7 @@ export const StatusBar: React.FC = () => {
           onClick={() => fetchDevices()}
           disabled={isLoading}
           className="hover:text-text-primary p-0.5"
-          title="Refresh ADB devices"
+          title={t('refreshAdbDevices')}
         >
           <RotateCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
@@ -80,7 +80,7 @@ export const StatusBar: React.FC = () => {
           <div className="flex items-center gap-1.5 text-emerald-400">
             <Radio className="w-3 h-3 animate-pulse" />
             <span>
-              {activeSessions.length} session{activeSessions.length > 1 ? 's' : ''} running
+              {tf('sessionsRunning', { count: activeSessions.length })}
             </span>
           </div>
         ) : lastError ? (
@@ -89,7 +89,7 @@ export const StatusBar: React.FC = () => {
             <span className="truncate">{lastError}</span>
           </div>
         ) : (
-          <span className="text-text-muted">Ready</span>
+          <span className="text-text-muted">{t('stateReady')}</span>
         )}
       </div>
 
@@ -102,7 +102,7 @@ export const StatusBar: React.FC = () => {
               v{detection.scrcpyVersion || '4.1'}
             </span>
           ) : (
-            <span className="text-rose-400">offline</span>
+            <span className="text-rose-400">{t('runtimeOffline')}</span>
           )}
         </div>
 
@@ -115,7 +115,7 @@ export const StatusBar: React.FC = () => {
               v{detection.adbVersion || '1.0.41'}
             </span>
           ) : (
-            <span className="text-rose-400">offline</span>
+            <span className="text-rose-400">{t('runtimeOffline')}</span>
           )}
         </div>
       </div>

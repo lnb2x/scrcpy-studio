@@ -6,6 +6,10 @@ pub enum DeviceState {
     Device,
     Offline,
     Unauthorized,
+    Authorizing,
+    Bootloader,
+    Recovery,
+    Sideload,
     #[default]
     Unknown,
 }
@@ -62,4 +66,13 @@ pub struct DeviceInfo {
     pub supports_audio: bool,
     pub supports_camera: bool,
     pub supports_virtual_display: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MdnsService {
+    pub name: String,
+    pub service_type: String,
+    pub address: String,
+    pub is_pairing: bool,
 }

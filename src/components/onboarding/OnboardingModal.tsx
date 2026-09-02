@@ -9,13 +9,16 @@ import {
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useTranslation } from '@/lib/i18n';
 
 export const OnboardingModal: React.FC = () => {
+  const { t, tf } = useTranslation();
   const {
     settings,
     detection,
     isDetecting,
     isHydrated,
+    runtimeError,
     detectExecutables,
     setCustomScrcpyPath,
     setCustomAdbPath,
@@ -30,7 +33,7 @@ export const OnboardingModal: React.FC = () => {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Executable', extensions: ['exe'] }],
+        filters: [{ name: t('executableFile'), extensions: ['exe'] }],
       });
       if (selected && typeof selected === 'string') {
         await setCustomScrcpyPath(selected);
@@ -44,7 +47,7 @@ export const OnboardingModal: React.FC = () => {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Executable', extensions: ['exe'] }],
+        filters: [{ name: t('executableFile'), extensions: ['exe'] }],
       });
       if (selected && typeof selected === 'string') {
         await setCustomAdbPath(selected);
@@ -60,7 +63,7 @@ export const OnboardingModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-      <div className="w-full max-w-xl bg-card border border-border-highlight rounded-3xl p-8 shadow-2xl space-y-6">
+      <div role="dialog" aria-modal="true" aria-labelledby="onboarding-title" className="w-full max-w-xl bg-card border border-border-highlight rounded-3xl p-8 shadow-2xl space-y-6">
         {/* Step Indicator */}
         <div className="flex items-center justify-between pb-4 border-b border-border">
           <div className="flex items-center gap-3">
@@ -68,39 +71,35 @@ export const OnboardingModal: React.FC = () => {
               <Smartphone className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-text-primary">Welcome to Scrcpy Studio</h2>
-              <p className="text-xs text-text-secondary">Step {step} of 2</p>
+              <h2 id="onboarding-title" className="text-base font-bold text-text-primary">{t('onboardingWelcome')}</h2>
+              <p className="text-xs text-text-secondary">{tf('onboardingStep', { step })}</p>
             </div>
           </div>
 
           <span className="text-xs font-mono font-bold px-2 py-1 rounded bg-surface border border-border text-primary">
-            v4.1 Ready
+            {tf('scrcpyVersionReady', { version: '4.1' })}
           </span>
         </div>
 
         {step === 1 && (
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-bold text-text-primary">Toolchain Verification</h3>
-              <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                Scrcpy Studio requires <span className="text-text-primary font-semibold">scrcpy 4.1</span> and{' '}
-                <span className="text-text-primary font-semibold">adb</span> installed on your PC. Let's verify their
-                paths.
-              </p>
+              <h3 className="text-sm font-bold text-text-primary">{t('toolchainVerification')}</h3>
+              <p className="text-xs text-text-secondary mt-1 leading-relaxed">{t('toolchainRequirement')}</p>
             </div>
 
             <div className="space-y-3">
               {/* Scrcpy Path Item */}
               <div className="p-4 rounded-xl bg-surface border border-border space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-text-primary">scrcpy Executable</span>
+                  <span className="text-xs font-bold text-text-primary">{t('scrcpyExecutable')}</span>
                   {detection?.isScrcpyReady ? (
                     <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Detected (v{detection.scrcpyVersion})
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {tf('detectedVersion', { version: detection.scrcpyVersion ?? t('unknown') })}
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-[11px] font-mono text-rose-400 font-semibold">
-                      <XCircle className="w-3.5 h-3.5" /> Not Found
+                      <XCircle className="w-3.5 h-3.5" /> {t('notFound')}
                     </span>
                   )}
                 </div>
@@ -110,14 +109,15 @@ export const OnboardingModal: React.FC = () => {
                     type="text"
                     readOnly
                     value={settings.scrcpyPath}
-                    placeholder="scrcpy.exe not found"
+                    placeholder={tf('executableNotFound', { name: 'scrcpy' })}
                     className="flex-1 px-3 py-1.5 rounded-lg bg-background border border-border text-xs text-text-primary font-mono"
                   />
                   <button
-                    onClick={handleBrowseScrcpy}
+                    type="button"
+                    onClick={() => void handleBrowseScrcpy()}
                     className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary text-xs border border-border font-medium"
                   >
-                    Browse
+                    {t('browse')}
                   </button>
                 </div>
               </div>
@@ -125,14 +125,14 @@ export const OnboardingModal: React.FC = () => {
               {/* ADB Path Item */}
               <div className="p-4 rounded-xl bg-surface border border-border space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-text-primary">ADB Executable</span>
+                  <span className="text-xs font-bold text-text-primary">{t('adbExecutable')}</span>
                   {detection?.isAdbReady ? (
                     <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Detected (v{detection.adbVersion})
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {tf('detectedVersion', { version: detection.adbVersion ?? t('unknown') })}
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-[11px] font-mono text-rose-400 font-semibold">
-                      <XCircle className="w-3.5 h-3.5" /> Not Found
+                      <XCircle className="w-3.5 h-3.5" /> {t('notFound')}
                     </span>
                   )}
                 </div>
@@ -142,34 +142,43 @@ export const OnboardingModal: React.FC = () => {
                     type="text"
                     readOnly
                     value={settings.adbPath}
-                    placeholder="adb.exe not found"
+                    placeholder={tf('executableNotFound', { name: 'adb' })}
                     className="flex-1 px-3 py-1.5 rounded-lg bg-background border border-border text-xs text-text-primary font-mono"
                   />
                   <button
-                    onClick={handleBrowseAdb}
+                    type="button"
+                    onClick={() => void handleBrowseAdb()}
                     className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active text-text-secondary text-xs border border-border font-medium"
                   >
-                    Browse
+                    {t('browse')}
                   </button>
                 </div>
               </div>
             </div>
 
+            {runtimeError && (
+              <p role="alert" className="text-xs text-rose-400 rounded-xl bg-rose-500/10 border border-rose-500/20 p-3">
+                {runtimeError}
+              </p>
+            )}
+
             <div className="flex items-center justify-between pt-2">
               <button
-                onClick={() => detectExecutables()}
+                type="button"
+                onClick={() => void detectExecutables()}
                 disabled={isDetecting}
                 className="flex items-center gap-1.5 text-xs text-primary hover:underline font-semibold disabled:opacity-50"
               >
                 <Search className="w-3.5 h-3.5" />
-                <span>{isDetecting ? 'Scanning...' : 'Auto-detect again'}</span>
+                <span>{isDetecting ? t('scanningRuntime') : t('autoDetectAgain')}</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setStep(2)}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-md transition-all transform active:scale-95"
               >
-                <span>Continue</span>
+                <span>{t('continue')}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -179,9 +188,9 @@ export const OnboardingModal: React.FC = () => {
         {step === 2 && (
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-bold text-text-primary">Enable USB Debugging on your Phone</h3>
+              <h3 className="text-sm font-bold text-text-primary">{t('enableUsbDebugging')}</h3>
               <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                Follow these 3 simple steps on your Android device to connect:
+                {t('usbDebuggingIntro')}
               </p>
             </div>
 
@@ -190,47 +199,43 @@ export const OnboardingModal: React.FC = () => {
                 <div className="w-8 h-8 rounded-full bg-primary-light text-primary font-bold text-xs flex items-center justify-center mx-auto">
                   1
                 </div>
-                <span className="text-xs font-bold text-text-primary block">Developer Options</span>
-                <p className="text-[11px] text-text-muted">
-                  Go to Settings → About Phone → Tap 'Build Number' 7 times.
-                </p>
+                <span className="text-xs font-bold text-text-primary block">{t('developerOptions')}</span>
+                <p className="text-[11px] text-text-muted">{t('developerOptionsStep')}</p>
               </div>
 
               <div className="p-4 rounded-xl bg-surface border border-border space-y-2 text-center">
                 <div className="w-8 h-8 rounded-full bg-primary-light text-primary font-bold text-xs flex items-center justify-center mx-auto">
                   2
                 </div>
-                <span className="text-xs font-bold text-text-primary block">USB Debugging</span>
-                <p className="text-[11px] text-text-muted">
-                  Open Developer Options → Turn on 'USB Debugging'.
-                </p>
+                <span className="text-xs font-bold text-text-primary block">{t('usbDebugging')}</span>
+                <p className="text-[11px] text-text-muted">{t('usbDebuggingStep')}</p>
               </div>
 
               <div className="p-4 rounded-xl bg-surface border border-border space-y-2 text-center">
                 <div className="w-8 h-8 rounded-full bg-primary-light text-primary font-bold text-xs flex items-center justify-center mx-auto">
                   3
                 </div>
-                <span className="text-xs font-bold text-text-primary block">Authorize PC</span>
-                <p className="text-[11px] text-text-muted">
-                  Plug in USB cable → Check 'Always allow' → Tap 'Allow'.
-                </p>
+                <span className="text-xs font-bold text-text-primary block">{t('authorizePc')}</span>
+                <p className="text-[11px] text-text-muted">{t('authorizePcStep')}</p>
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-2">
               <button
+                type="button"
                 onClick={() => setStep(1)}
                 className="text-xs text-text-secondary hover:text-text-primary font-medium"
               >
-                Back
+                {t('back')}
               </button>
 
               <button
+                type="button"
                 onClick={handleFinish}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md transition-all transform active:scale-95"
               >
                 <Zap className="w-4 h-4 fill-current" />
-                <span>Get Started</span>
+                <span>{t('getStarted')}</span>
               </button>
             </div>
           </div>

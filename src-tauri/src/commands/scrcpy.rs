@@ -32,8 +32,8 @@ pub async fn get_active_sessions(
 pub fn build_command_args(
     config: ScrcpyConfig,
     scrcpy_service: State<'_, ScrcpyService>,
-) -> Vec<String> {
-    scrcpy_service.build_args(&config)
+) -> AppResult<Vec<String>> {
+    scrcpy_service.validated_args(&config)
 }
 
 #[tauri::command]

@@ -25,8 +25,11 @@ _Mirror presets, video settings, and live command configuration._
 - Mirror Android 12+ cameras and query available cameras or encoders.
 - Pair and connect with Android Wireless Debugging without assuming the pairing port is the connection port.
 - Install APKs, push files, capture screenshots, reboot devices, and browse third-party packages.
+- Browse device storage: navigate folders, create directories, pull files to PC, and delete entries from a connected device.
+- Launch or uninstall installed applications directly from the ADB Tools page.
 - Save custom profiles, session history, application settings, and wireless connection history locally.
 - View scrcpy process output and session status in real time.
+- Navigate quickly with a command palette (Ctrl+K), keyboard shortcuts (`?`), and a toggleable sidebar (Ctrl+B).
 - Use English or Vietnamese UI text where translations are currently available.
 
 ## Requirements
@@ -41,6 +44,15 @@ Scrcpy Studio is currently Windows-focused and tested for Windows 10/11.
 - WebView2 Runtime, normally included with current Windows releases
 
 Scrcpy and ADB are detected from `PATH` and common Winget, Scoop, Android SDK, and local installation paths. Custom executable paths can also be selected in Settings.
+
+On first launch, Runtime Diagnostics verifies that both executables can actually run, displays their detected versions, and reports whether an Android device is connected and authorized. Settings provides Auto Detect, Browse, Test, Check Runtime, and ADB Repair actions. Scrcpy Studio does not silently download or execute runtime archives.
+
+Recommended Windows runtime sources:
+
+- scrcpy 4.1 from the signed [Genymobile scrcpy release](https://github.com/Genymobile/scrcpy/releases/tag/v4.1) (Apache License 2.0).
+- ADB from the official [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) (Android SDK license).
+
+The official scrcpy Windows archive also includes the matching ADB runtime. Review the upstream licenses before redistributing either runtime with a downstream package.
 
 ## Development
 
@@ -59,6 +71,7 @@ npm run lint
 npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+npm run check:versions
 ```
 
 Create a production installer with:
@@ -67,7 +80,27 @@ Create a production installer with:
 npm run tauri build
 ```
 
-The repository does not commit generated executables, `node_modules`, frontend bundles, or Rust target artifacts. No official binary release is published yet; build from source for now.
+The repository does not commit generated executables, `node_modules`, frontend bundles, or Rust target artifacts. Pushing a tag such as `v0.2.0` runs the Windows release workflow, verifies the full frontend/Rust suite, and publishes versioned NSIS and MSI installers. Releases remain unsigned when signing secrets are absent.
+
+## Updates and signing
+
+Automatic updates use Tauri 2's signed updater and the repository's HTTPS GitHub Release `latest.json`. Signature verification cannot be disabled. Unsigned builds display a clear message and continue to support manual updates.
+
+Repository owners enable signed updater artifacts with these GitHub Actions secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`: Tauri updater private key content or path.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: optional private-key password.
+- `TAURI_UPDATER_PUBLIC_KEY`: matching public key embedded at compile time.
+
+Optional Windows Authenticode signing is enabled independently when all of these secrets exist:
+
+- `WINDOWS_CERTIFICATE`: the base64-encoded `.pfx` certificate.
+- `WINDOWS_CERTIFICATE_PASSWORD`: the `.pfx` import password.
+- `WINDOWS_TIMESTAMP_URL`: the certificate provider's timestamp service URL.
+
+Generate the updater key pair with `npm run tauri signer generate`. Never commit the private key. The release runner imports an optional Windows certificate only for the build and removes it afterward; unsigned NSIS/MSI builds remain supported.
+
+Versions in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` are checked by `npm run check:versions`. Tag builds also require the `vX.Y.Z` tag to match.
 
 ## Project structure
 
@@ -87,6 +120,7 @@ The TypeScript command builder drives the preview and is covered by unit tests. 
 - Android camera mirroring requires Android 12 or newer. Audio forwarding requires Android 11 or newer.
 - Device capability badges are inferred from Android API level and should be treated as compatibility guidance, not hardware certification.
 - ADB access is powerful. Review device prompts and custom arguments before running them.
+- System tray minimize/restore remains on the roadmap; no partial tray behavior is enabled in this release.
 
 ## Author
 

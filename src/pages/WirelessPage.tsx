@@ -1,10 +1,21 @@
 import React, { useState } from 'react';
-import { Wifi, Smartphone, Link, QrCode, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import {
+  Wifi,
+  Smartphone,
+  Link,
+  QrCode,
+  CheckCircle2,
+  AlertCircle,
+  Trash2,
+  RefreshCw,
+} from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { useTranslation } from '@/lib/i18n';
 import { isPairingCode, normalizeAdbAddress } from '@/lib/adbAddress';
 import { readStoredArray, writeStoredJson } from '@/lib/storage';
+import { formatAppError } from '@/lib/errors';
+import type { MdnsService } from '@/types/device';
 
 interface WirelessHistoryItem {
   address: string;
@@ -13,8 +24,8 @@ interface WirelessHistoryItem {
 }
 
 export const WirelessPage: React.FC = () => {
-  const { t } = useTranslation();
-  const { fetchDevices, selectedDevice } = useDeviceStore();
+  const { t, tf } = useTranslation();
+  const { devices, fetchDevices, selectedDevice } = useDeviceStore();
 
   const [manualIp, setManualIp] = useState('');
   const [manualPort, setManualPort] = useState('5555');
@@ -25,6 +36,8 @@ export const WirelessPage: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isPairing, setIsPairing] = useState(false);
   const [isSwitchingTcpIp, setIsSwitchingTcpIp] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [discoveredServices, setDiscoveredServices] = useState<MdnsService[]>([]);
 
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -55,6 +68,19 @@ export const WirelessPage: React.FC = () => {
     });
   };
 
+  const handleScan = async () => {
+    setIsScanning(true);
+    setStatusMessage(null);
+    try {
+      const services = await invoke<MdnsService[]>('adb_discover_mdns');
+      setDiscoveredServices(services);
+    } catch (error) {
+      setStatusMessage({ text: `${t('mdnsDiscoveryFailed')}: ${formatAppError(error)}`, isError: true });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   // Method 1: USB to TCP/IP switch
   const handleEnableTcpIp = async () => {
     if (!selectedDevice || selectedDevice.connectionType === 'tcpip') return;
@@ -66,13 +92,13 @@ export const WirelessPage: React.FC = () => {
         port: 5555,
       });
       setStatusMessage({
-        text: 'TCP/IP mode (port 5555) enabled! Unplug USB and connect via IP.',
+        text: t('tcpipEnabled'),
         isError: false,
       });
       await fetchDevices();
     } catch (e) {
       setStatusMessage({
-        text: `Failed to enable TCP/IP mode: ${String(e)}`,
+        text: `${t('tcpipEnableFailed')}: ${formatAppError(e)}`,
         isError: true,
       });
     } finally {
@@ -86,7 +112,7 @@ export const WirelessPage: React.FC = () => {
       ? normalizeAdbAddress(addressOverride)
       : normalizeAdbAddress(manualIp, manualPort || '5555');
     if (!addr) {
-      setStatusMessage({ text: 'Enter a valid IPv4 address and port (1–65535).', isError: true });
+      setStatusMessage({ text: t('invalidWirelessAddress'), isError: true });
       return;
     }
 
@@ -94,11 +120,11 @@ export const WirelessPage: React.FC = () => {
     setStatusMessage(null);
     try {
       const res = await invoke<string>('adb_connect', { address: addr });
-      setStatusMessage({ text: `Connected: ${res}`, isError: false });
+      setStatusMessage({ text: tf('wirelessConnected', { result: res }), isError: false });
       addHistoryItem(addr);
       await fetchDevices();
     } catch (e) {
-      setStatusMessage({ text: `Connection failed: ${String(e)}`, isError: true });
+      setStatusMessage({ text: `${t('wirelessConnectionFailed')}: ${formatAppError(e)}`, isError: true });
     } finally {
       setIsConnecting(false);
     }
@@ -108,7 +134,7 @@ export const WirelessPage: React.FC = () => {
   const handlePair = async () => {
     const pairingAddress = normalizeAdbAddress(pairIp);
     if (!pairingAddress || !isPairingCode(pairCode)) {
-      setStatusMessage({ text: 'Enter the pairing IP:port and a valid 6-digit code.', isError: true });
+      setStatusMessage({ text: t('invalidPairingDetails'), isError: true });
       return;
     }
 
@@ -120,12 +146,12 @@ export const WirelessPage: React.FC = () => {
         code: pairCode.trim(),
       });
       setStatusMessage({
-        text: `Paired successfully: ${res}. Now enter the separate connection port shown on the device.`,
+        text: tf('wirelessPairSucceeded', { result: res }),
         isError: false,
       });
       setPairCode('');
     } catch (e) {
-      setStatusMessage({ text: `Pairing failed: ${String(e)}`, isError: true });
+      setStatusMessage({ text: `${t('wirelessPairFailed')}: ${formatAppError(e)}`, isError: true });
     } finally {
       setIsPairing(false);
     }
@@ -142,6 +168,66 @@ export const WirelessPage: React.FC = () => {
           {t('wirelessSubtext')}
         </p>
       </div>
+
+      <section className="p-5 rounded-2xl bg-card border border-border space-y-4" aria-labelledby="wireless-devices-title">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 id="wireless-devices-title" className="text-sm font-bold text-text-primary">
+              {t('wirelessDevices')}
+            </h2>
+            <p className="text-xs text-text-secondary mt-0.5">{t('wirelessDiscoveryDescription')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleScan()}
+            disabled={isScanning}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-active border border-border text-xs font-semibold text-text-secondary disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+            {isScanning ? t('scanningWireless') : t('refresh')}
+          </button>
+        </div>
+
+        {discoveredServices.length === 0 ? (
+          <div className="p-6 text-center rounded-xl bg-surface border border-border text-xs text-text-muted">
+            {isScanning ? t('scanningWireless') : t('noWirelessDevicesFound')}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            {discoveredServices.map((service) => {
+              const isConnected = devices.some((device) => device.serial === service.address);
+              return (
+                <div key={`${service.name}-${service.serviceType}`} className="p-3 rounded-xl bg-surface border border-border flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-text-primary truncate">{service.name}</p>
+                    <p className="text-[10px] text-text-muted font-mono truncate">{service.address}</p>
+                    <p className="text-[10px] text-text-muted mt-0.5">
+                      {service.isPairing ? t('pairingPort') : t('connectionPort')} ·{' '}
+                      <span className={isConnected ? 'text-emerald-400' : ''}>
+                        {isConnected ? t('connected') : t('available')}
+                      </span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (service.isPairing) {
+                        setPairIp(service.address);
+                      } else {
+                        void handleConnect(service.address);
+                      }
+                    }}
+                    disabled={isConnecting || isConnected}
+                    className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold disabled:opacity-50"
+                  >
+                    {service.isPairing ? t('usePairingPort') : isConnected ? t('connected') : t('connect')}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Status Notice */}
       {statusMessage && (
@@ -185,7 +271,7 @@ export const WirelessPage: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold shadow-sm transition-all transform active:scale-98 disabled:opacity-50"
           >
             <Wifi className="w-4 h-4" />
-            <span>{isSwitchingTcpIp ? 'Switching...' : t('enableWirelessBtn')}</span>
+            <span>{isSwitchingTcpIp ? t('switchingWireless') : t('enableWirelessBtn')}</span>
           </button>
         </div>
 
@@ -199,7 +285,7 @@ export const WirelessPage: React.FC = () => {
               {t('manualConnect')}
             </h3>
             <p className="text-xs text-text-secondary mt-0.5">
-              Connect to a known Android device IP on port 5555.
+              {t('manualConnectDescription')}
             </p>
           </div>
 
@@ -237,7 +323,7 @@ export const WirelessPage: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-surface-hover hover:bg-surface-active text-text-primary text-xs font-semibold border border-border transition-colors disabled:opacity-50"
           >
             <Link className="w-4 h-4" />
-            <span>{isConnecting ? 'Connecting...' : t('connect')}</span>
+            <span>{isConnecting ? t('connectingWireless') : t('connect')}</span>
           </button>
         </div>
 
@@ -290,7 +376,7 @@ export const WirelessPage: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-surface-hover hover:bg-surface-active text-text-primary text-xs font-semibold border border-border transition-colors disabled:opacity-50"
           >
             <QrCode className="w-4 h-4" />
-            <span>{isPairing ? 'Pairing...' : t('pairAndConnect')}</span>
+            <span>{isPairing ? t('pairingWireless') : t('pairAndConnect')}</span>
           </button>
         </div>
 
@@ -302,7 +388,7 @@ export const WirelessPage: React.FC = () => {
 
           {history.length === 0 ? (
             <div className="p-8 text-center text-xs text-text-muted rounded-xl bg-surface border border-border">
-              No recent wireless connections.
+              {t('noWirelessHistory')}
             </div>
           ) : (
             <div className="space-y-2 max-h-[160px] overflow-y-auto">
@@ -328,7 +414,9 @@ export const WirelessPage: React.FC = () => {
                       {t('reconnect')}
                     </button>
                     <button
+                      type="button"
                       onClick={() => removeHistoryItem(item.address)}
+                      aria-label={`${t('removeWirelessHistory')}: ${item.address}`}
                       className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-rose-400"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

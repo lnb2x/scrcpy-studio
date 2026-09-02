@@ -1,0 +1,168 @@
+[
+  {
+    "name": "normal mirror",
+    "config": { "serial": "device-1", "maxSize": 1600, "maxFps": 60 },
+    "expected": ["--serial", "device-1", "--max-size=1600", "--max-fps=60"]
+  },
+  {
+    "name": "H264 default codec",
+    "config": { "videoCodec": "h264" },
+    "expected": []
+  },
+  {
+    "name": "H265 codec",
+    "config": { "videoCodec": "h265" },
+    "expected": ["--video-codec=h265"]
+  },
+  {
+    "name": "AV1 codec",
+    "config": { "videoCodec": "av1" },
+    "expected": ["--video-codec=av1"]
+  },
+  {
+    "name": "custom FPS and bitrate",
+    "config": { "maxFps": 90, "videoBitrate": "12M" },
+    "expected": ["--max-fps=90", "--video-bit-rate=12M"]
+  },
+  {
+    "name": "audio disabled",
+    "config": { "audioEnabled": false },
+    "expected": ["--no-audio"]
+  },
+  {
+    "name": "camera facing and high speed",
+    "config": {
+      "camera": { "enabled": true, "cameraFacing": "back", "cameraFps": 120, "cameraHighSpeed": true }
+    },
+    "expected": ["--video-source=camera", "--camera-facing=back", "--camera-fps=120", "--camera-high-speed"]
+  },
+  {
+    "name": "camera ID wins over facing",
+    "config": {
+      "camera": { "enabled": true, "cameraId": "0", "cameraFacing": "front" }
+    },
+    "expected": ["--video-source=camera", "--camera-id=0"]
+  },
+  {
+    "name": "camera size wins over aspect ratio and max size",
+    "config": {
+      "maxSize": 1600,
+      "camera": { "enabled": true, "cameraSize": "1920x1080", "cameraAr": "16:9" }
+    },
+    "expected": ["--video-source=camera", "--camera-size=1920x1080"]
+  },
+  {
+    "name": "recording without playback",
+    "config": { "recordPath": "capture.mkv", "recordFormat": "mkv", "noPlayback": true },
+    "expected": ["--record=capture.mkv", "--record-format=mkv", "--no-playback"]
+  },
+  {
+    "name": "separate playback controls",
+    "config": { "noVideoPlayback": true, "noAudioPlayback": true },
+    "expected": ["--no-video-playback", "--no-audio-playback"]
+  },
+  {
+    "name": "OTG input modes discard media settings",
+    "config": {
+      "serial": "usb-1",
+      "otgMode": true,
+      "keyboardMode": "uhid",
+      "mouseMode": "aoa",
+      "gamepadMode": "uhid",
+      "videoCodec": "h265",
+      "audioEnabled": false,
+      "customArgs": ["--video-codec=av1", "--no-mipmaps"]
+    },
+    "expected": ["--serial", "usb-1", "--otg", "--keyboard=uhid", "--mouse=aoa", "--gamepad=uhid", "--no-mipmaps"]
+  },
+  {
+    "name": "UHID keyboard AOA mouse and gamepad",
+    "config": { "keyboardMode": "uhid", "mouseMode": "aoa", "gamepadMode": "uhid" },
+    "expected": ["--keyboard=uhid", "--mouse=aoa", "--gamepad=uhid"]
+  },
+  {
+    "name": "virtual display",
+    "config": {
+      "virtualDisplay": {
+        "enabled": true,
+        "resolution": "1920x1080",
+        "dpi": 420,
+        "flexDisplay": true,
+        "destroyContent": false,
+        "systemDecorations": false,
+        "startApp": "com.android.settings"
+      }
+    },
+    "expected": [
+      "--new-display=1920x1080/420",
+      "--flex-display",
+      "--no-vd-destroy-content",
+      "--no-vd-system-decorations",
+      "--start-app=com.android.settings"
+    ]
+  },
+  {
+    "name": "screen off and timeout",
+    "config": { "turnScreenOff": true, "screenOffTimeout": 300 },
+    "expected": ["--turn-screen-off", "--screen-off-timeout=300"]
+  },
+  {
+    "name": "tunnel host and port",
+    "config": { "tunnelHost": "10.0.0.2", "tunnelPort": 27183 },
+    "expected": ["--tunnel-host=10.0.0.2", "--tunnel-port=27183"]
+  },
+  {
+    "name": "wireless device serial",
+    "config": { "serial": "192.168.1.20:5555" },
+    "expected": ["--serial", "192.168.1.20:5555"]
+  },
+  {
+    "name": "custom argument duplicates and typed conflicts",
+    "config": {
+      "alwaysOnTop": true,
+      "customArgs": ["--always-on-top", "--no-mipmaps", "--no-mipmaps"]
+    },
+    "expected": ["--always-on-top", "--no-mipmaps"]
+  },
+  {
+    "name": "expert codecs buffers input and rendering",
+    "config": {
+      "videoCodecOptions": "profile:long=1",
+      "audioCodecOptions": "bitrate-mode:int=2",
+      "audioOutputBuffer": 20,
+      "displayImePolicy": "local",
+      "keepActive": true,
+      "mouseBind": "bhsn:++++",
+      "noMouseHover": true,
+      "shortcutMod": "lalt,lsuper",
+      "backgroundColor": "#000000",
+      "noWindowAspectRatioLock": true,
+      "noDownsizeOnError": true,
+      "noCleanup": true
+    },
+    "expected": [
+      "--video-codec-options=profile:long=1",
+      "--no-downsize-on-error",
+      "--audio-output-buffer=20",
+      "--audio-codec-options=bitrate-mode:int=2",
+      "--display-ime-policy=local",
+      "--keep-active",
+      "--mouse-bind=bhsn:++++",
+      "--no-mouse-hover",
+      "--shortcut-mod=lalt,lsuper",
+      "--background-color=#000000",
+      "--no-window-aspect-ratio-lock",
+      "--no-cleanup"
+    ]
+  },
+  {
+    "name": "voice call uplink audio source",
+    "config": { "audioSource": "voice-call-uplink" },
+    "expected": ["--audio-source=voice-call-uplink"]
+  },
+  {
+    "name": "voice call downlink audio source",
+    "config": { "audioSource": "voice-call-downlink" },
+    "expected": ["--audio-source=voice-call-downlink"]
+  }
+]

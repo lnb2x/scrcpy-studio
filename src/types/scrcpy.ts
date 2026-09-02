@@ -1,11 +1,23 @@
 export type VideoCodec = 'h264' | 'h265' | 'av1' | 'vp8' | 'vp9';
 export type AudioCodec = 'opus' | 'aac' | 'flac' | 'raw';
-export type AudioSource = 'output' | 'playback' | 'mic' | 'mic-unprocessed' | 'mic-camcorder' | 'mic-voice-recognition' | 'mic-voice-communication' | 'voice-call' | 'voice-performance';
+export type AudioSource =
+  | 'output'
+  | 'playback'
+  | 'mic'
+  | 'mic-unprocessed'
+  | 'mic-camcorder'
+  | 'mic-voice-recognition'
+  | 'mic-voice-communication'
+  | 'voice-call'
+  | 'voice-call-uplink'
+  | 'voice-call-downlink'
+  | 'voice-performance';
 export type InputMode = 'sdk' | 'uhid' | 'aoa' | 'disabled';
 export type GamepadMode = 'disabled' | 'uhid' | 'aoa';
 export type RenderFit = 'letterbox' | 'stretched' | 'unscaled';
 export type RenderDriver = 'auto' | 'direct3d' | 'opengl' | 'opengles2' | 'opengles' | 'metal' | 'software';
 export type RecordFormat = 'mp4' | 'mkv' | 'm4a' | 'mka' | 'opus' | 'aac' | 'flac' | 'wav';
+export type DisplayImePolicy = 'local' | 'fallback' | 'hide';
 
 export interface CameraConfig {
   enabled: boolean;
@@ -39,8 +51,10 @@ export interface ScrcpyConfig {
   maxFps?: number;
   videoBitrate?: string;
   videoEncoder?: string;
+  videoCodecOptions?: string;
   videoBuffer?: number;
   ignoreVideoEncoderConstraints?: boolean;
+  noDownsizeOnError?: boolean;
   minSizeAlignment?: number;
   crop?: string;
   displayOrientation?: string;
@@ -53,8 +67,10 @@ export interface ScrcpyConfig {
   audioCodec?: AudioCodec;
   audioBitrate?: string;
   audioBuffer?: number;
+  audioOutputBuffer?: number;
   audioDup?: boolean;
   audioEncoder?: string;
+  audioCodecOptions?: string;
   requireAudio?: boolean;
 
   // Input & Control
@@ -72,6 +88,12 @@ export interface ScrcpyConfig {
   noKeyRepeat?: boolean;
   preferText?: boolean;
   rawKeyEvents?: boolean;
+  screenOffTimeout?: number;
+  displayImePolicy?: DisplayImePolicy;
+  keepActive?: boolean;
+  mouseBind?: string;
+  noMouseHover?: boolean;
+  shortcutMod?: string;
 
   // Window
   fullscreen?: boolean;
@@ -84,6 +106,10 @@ export interface ScrcpyConfig {
   windowY?: string;
   renderDriver?: RenderDriver;
   renderFit?: RenderFit;
+  backgroundColor?: string;
+  noWindow?: boolean;
+  noWindowAspectRatioLock?: boolean;
+  noMipmaps?: boolean;
   disableScreensaver?: boolean;
   printFps?: boolean;
 
@@ -92,6 +118,8 @@ export interface ScrcpyConfig {
   recordFormat?: RecordFormat;
   recordOrientation?: string;
   noPlayback?: boolean;
+  noVideoPlayback?: boolean;
+  noAudioPlayback?: boolean;
 
   // Modes & Special
   otgMode?: boolean;
@@ -101,6 +129,7 @@ export interface ScrcpyConfig {
   tunnelPort?: number;
   forceAdbForward?: boolean;
   killAdbOnClose?: boolean;
+  noCleanup?: boolean;
 
   // Sub-configs
   camera?: CameraConfig;

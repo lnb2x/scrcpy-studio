@@ -31,9 +31,9 @@ export const DashboardPage: React.FC = () => {
 
   const getGreeting = () => {
     const hr = new Date().getHours();
-    if (hr < 12) return 'Good morning';
-    if (hr < 18) return 'Good afternoon';
-    return 'Good evening';
+    if (hr < 12) return t('goodMorning');
+    if (hr < 18) return t('goodAfternoon');
+    return t('goodEvening');
   };
 
   return (
@@ -50,7 +50,8 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         <button
-          onClick={() => fetchDevices()}
+          type="button"
+          onClick={() => void fetchDevices()}
           disabled={isLoading}
           className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface-hover hover:bg-surface-active text-text-secondary hover:text-text-primary text-xs font-semibold border border-border transition-all transform active:scale-95 disabled:opacity-50"
         >
@@ -92,19 +93,22 @@ export const DashboardPage: React.FC = () => {
                 {t('devices')} ({devices.length})
               </h3>
               <button
+                type="button"
                 onClick={() => setActiveTab('devices')}
                 className="text-xs text-primary hover:underline flex items-center gap-0.5"
               >
-                View all <ChevronRight className="w-3 h-3" />
+                {t('viewAll')} <ChevronRight className="w-3 h-3" />
               </button>
             </div>
 
             <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
               {devices.map((dev) => (
-                <div
+                <button
+                  type="button"
                   key={dev.serial}
                   onClick={() => selectDevice(dev.serial)}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                  aria-pressed={dev.serial === selectedDevice?.serial}
+                  className={`w-full p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-left ${
                     dev.serial === selectedDevice?.serial
                       ? 'bg-primary-light border-primary/40'
                       : 'bg-card hover:bg-card-hover border-border'
@@ -128,7 +132,7 @@ export const DashboardPage: React.FC = () => {
                         : 'bg-rose-400'
                     }`}
                   />
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -144,65 +148,65 @@ export const DashboardPage: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           <QuickActionCard
             title={t('actionMirror')}
-            description="Start real-time screen mirror at recommended settings"
+            description={t('quickMirrorDescription')}
             icon={Cast}
-            badge="Default"
+            badge={t('defaultLabel')}
             disabled={!selectedDevice || selectedDevice.state !== 'device'}
-            onClick={() => startSession()}
+            onClick={() => void startSession()}
           />
 
           <QuickActionCard
             title={t('actionMirrorAudio')}
-            description="Mirror device screen with low-latency audio forwarding"
+            description={t('quickAudioDescription')}
             icon={Volume2}
             disabled={!selectedDevice || selectedDevice.state !== 'device'}
-            onClick={() => startSession({ audioEnabled: true })}
+            onClick={() => void startSession({ audioEnabled: true })}
           />
 
           <QuickActionCard
             title={t('actionScreenOff')}
-            description="Turn off device physical screen while mirroring"
+            description={t('quickScreenOffDescription')}
             icon={Moon}
             disabled={!selectedDevice || selectedDevice.state !== 'device'}
-            onClick={() => startSession({ turnScreenOff: true })}
+            onClick={() => void startSession({ turnScreenOff: true })}
           />
 
           <QuickActionCard
             title={t('actionRecord')}
-            description="Open recording studio to capture video/audio sessions"
+            description={t('quickRecordDescription')}
             icon={Video}
             onClick={() => setActiveTab('recording')}
           />
 
           <QuickActionCard
             title={t('actionCamera')}
-            description="Stream front or back camera directly to your desktop"
+            description={t('quickCameraDescription')}
             icon={Camera}
             onClick={() => setActiveTab('camera')}
           />
 
           <QuickActionCard
             title={t('actionWireless')}
-            description="Connect wirelessly over Wi-Fi without USB cables"
+            description={t('quickWirelessDescription')}
             icon={Wifi}
             onClick={() => setActiveTab('wireless')}
           />
 
           <QuickActionCard
             title={t('actionOtg')}
-            description="Control device with PC keyboard & mouse (no screen mirror)"
+            description={t('quickOtgDescription')}
             icon={Keyboard}
             disabled={!selectedDevice}
-            onClick={() => startSession(undefined, 'otg')}
+            onClick={() => void startSession(undefined, 'otg')}
           />
 
           <QuickActionCard
             title={t('actionVirtualDisplay')}
-            description="Create a standalone Android virtual display window"
+            description={t('quickVirtualDisplayDescription')}
             icon={MonitorPlay}
             disabled={!selectedDevice || selectedDevice.state !== 'device'}
             onClick={() =>
-              startSession(
+              void startSession(
                 { virtualDisplay: { enabled: true, resolution: '1920x1080' } },
                 'virtual_display'
               )
@@ -219,10 +223,11 @@ export const DashboardPage: React.FC = () => {
           </h3>
           {history.length > 0 && (
             <button
+              type="button"
               onClick={() => setActiveTab('logs')}
               className="text-xs text-primary hover:underline flex items-center gap-0.5"
             >
-              View logs <ChevronRight className="w-3 h-3" />
+              {t('viewLogs')} <ChevronRight className="w-3 h-3" />
             </button>
           )}
         </div>
@@ -239,7 +244,7 @@ export const DashboardPage: React.FC = () => {
                 : null;
               const durationStr = duration !== null
                 ? `${Math.floor(duration / 60)}m ${duration % 60}s`
-                : 'In Progress';
+                : t('inProgress');
 
               return (
                 <div
@@ -267,7 +272,7 @@ export const DashboardPage: React.FC = () => {
                         <span className="capitalize">{session.mode || 'Mirror'}</span>
                       </span>
                       <span className="text-[11px] text-text-muted font-mono">
-                        {new Date(session.startedAt).toLocaleTimeString()} • Duration: {durationStr}
+                        {new Date(session.startedAt).toLocaleTimeString()} • {t('duration')}: {durationStr}
                       </span>
                     </div>
                   </div>
@@ -285,10 +290,11 @@ export const DashboardPage: React.FC = () => {
 
                     {session.status === 'running' && (
                       <button
-                        onClick={() => stopSession(session.id)}
+                        type="button"
+                        onClick={() => void stopSession(session.id)}
                         className="px-2.5 py-1 rounded bg-rose-500 hover:bg-rose-600 text-white text-xs font-medium transition-colors"
                       >
-                        Stop
+                        {t('stop')}
                       </button>
                     )}
                   </div>
